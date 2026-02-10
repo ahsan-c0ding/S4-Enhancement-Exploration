@@ -6,7 +6,7 @@ class RecurrentS4(nn.Module):
         super().__init__()
         self.d_model = d_model  #number of features
         self.d_state = d_state  #state dimension per feature
-        A = -torch.eye(d_state)
+        A = -torch.eye(d_state)  #initilizes A as a -ve identity matrix (all zeros except diagonals are -1)
         
         self.A = nn.Parameter(A)# A ∈ ℝ^{N×N}: state transition matrix
         self.B = nn.Parameter(torch.randn(d_state, 1))    # B ∈ ℝ^{N×1}: input-to-state matrix
@@ -44,11 +44,11 @@ class RecurrentS4(nn.Module):
             
             u_k = u_k.unsqueeze(-1)  #converts u_k into column vector for matrix operations
             
-            x = torch.einsum("ij, bhj -> bhi", A_bar, x) + torch.einsum("ij, bhj -> bhi", B_bar, u_k)
+            x = torch.einsum("ij, bhj -> bhi", A_bar, x) + torch.einsum("ij, bhj -> bhi", B_bar, u_k) #for each batch 'b', and feature 'h', multiply A' or B' or C or D with appropraite state vector
 
             y = torch.einsum("ij, bhj -> bhi", self.C, x) + torch.einsum("ij, bhj -> bhi", self.D, u_k)
             
-            outputs.append(y.squeeze(-1))
+            outputs.append(y.squeeze(-1)) #removes the "dummy" dimension added in previous comment for math usage
         return torch.stack(outputs, dim=1)
              
 
