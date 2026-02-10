@@ -42,7 +42,7 @@ class RecurrentS4(nn.Module):
         for k in range(L):
             u_k = u[:,k,:]
             
-            u_k = u_k.unsqueeze(-1)
+            u_k = u_k.unsqueeze(-1)  #converts u_k into column vector for matrix operations
             
             x = torch.einsum("ij, bhj -> bhi", A_bar, x) + torch.einsum("ij, bhj -> bhi", B_bar, u_k)
 
