@@ -54,18 +54,22 @@ def benchmark(device):
         
         #------------- timings --------------------
         #Recurrent Timing
+        runs = 3
         start = time.time()
-        _ = model_rec(u)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        rec_time = time.time() - start
+        for _ in range(runs):
+            _ = model_rec(u)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+        rec_time = (time.time() - start)/runs
         
         #Convolutional Timing    
+        runs = 3
         start = time.time()
-        _ = model_conv(u)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        conv_time = time.time() - start            
+        for _ in range(runs):
+            _ = model_conv(u)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+        conv_time = (time.time() - start)/runs       
         
         results.append((L,rec_time,conv_time))
         
