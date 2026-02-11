@@ -109,6 +109,6 @@ Length | Recurrent (s) | Convolutional (s)
 The recurrent implementation scales linearly with L, having Big-O = O(L * N^2)
 The convolutional implementation scales quadtratically with L, having Big-O = O(L^2 * N)
 Thus for smaller sequence lengths, convolutional method is preferable due to faster
-run time, although for large value of L, e.g L=4096, the reccurent implementation 
+run time, although for large value of L, e.g L=4096, the recurrent implementation 
 preforms better due to the L term dominating over the N term.
 """

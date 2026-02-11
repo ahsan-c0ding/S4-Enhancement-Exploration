@@ -171,13 +171,16 @@ class S4D(nn.Module):
         """
         Given FFT Convolution, from task 5.4, we replace this with conv1d convolution
         to go from O(LlogL * N) to O(L^2 * N)
-        """
+        
         # 3. FFT Convolution (y = k * u)
         k_f = torch.fft.rfft(k, n=2*L) 
         u_f = torch.fft.rfft(u, n=2*L) 
         y = torch.fft.irfft(u_f * k_f, n=2*L)[..., :L] 
-        
-        
+        """
+        #3. Direct Convolution
+        k = k.unsqueeze(1) #(H, 1, L)
+        y = F.conv1d(u, k, padding=L-1, groups=self.h) #grouped convolution as each h has its own independent kernel
+        y = y[...,:L]
         
         # 4. Skip Connection
         y = y + u * self.D.unsqueeze(-1)
