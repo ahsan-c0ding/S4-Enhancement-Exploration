@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class RecurrentS4(nn.Module):
+class S4Recurrent(nn.Module):
     def __init__(self, d_model, d_state=64, dt_min=0.001, dt_max=0.1): 
         super().__init__()
         self.d_model = d_model  #number of features
@@ -62,7 +62,7 @@ class RecurrentS4(nn.Module):
              
 
 def main():
-    model = RecurrentS4(d_model=3)
+    model = S4Recurrent(d_model=3)
     u = torch.randn(2, 5, 3)
     y = model(u)
 
