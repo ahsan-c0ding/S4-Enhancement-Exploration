@@ -95,3 +95,20 @@ def main():
 if __name__ == "__main__":
     main()
         
+        
+"""
+Benchmark Summary:
+Length | Recurrent (s) | Convolutional (s)
+--------------------------------
+    64 |       0.016414 |          0.006255
+   256 |       0.054917 |          0.023555
+  1024 |       0.279290 |          0.088749
+  4096 |       1.027828 |          4.499007
+
+
+The recurrent implementation scales linearly with L, having Big-O = O(L * N^2)
+The convolutional implementation scales quadtratically with L, having Big-O = O(L^2 * N)
+Thus for smaller sequence lengths, convolutional method is preferable due to faster
+run time, although for large value of L, e.g L=4096, the reccurent implementation 
+preforms better due to the L term dominating over the N term.
+"""
