@@ -1,4 +1,4 @@
-# S4 Galaxy Classification - Base Code Repository
+# S4 Galaxy Classification - Team 0x43 Repository
 
 This repository provides starter code, utilities, and infrastructure for implementing S4-based galaxy morphology classification. It includes data loaders, model interfaces, visualization tools, and a reference S4D implementation.
   
@@ -49,15 +49,15 @@ pip install -r requirements.txt
 - `GalaxyClassifierS4D` - Main model combining Hilbert scanning, S4 layers, classification head
 - TODO: Complete `forward()` method
 
-**`model/s4d.py`** - Diagonal S4 layer
+**`model/s4d.py`** - Diagonal S4 layer: COMPLETED
 - Fully implemented reference implementation
 - Study for S4 architecture patterns, FFT convolution, diagonal parameterization
 
-**`model/hilbert.py`** - Hilbert curve utilities
+**`model/hilbert.py`** - Hilbert curve utilities: COMPLETED
 - `HilbertScan` - Converts 2D images to 1D sequences
 - TODO: Complete `_d2xy()` method
 
-**`model/tlts.py`** - Sequence pooling
+**`model/tlts.py`** - Sequence pooling: COMPLETED
 - `TakeLastTimestep` - Extracts final timestep for classification
 - TODO: Implement extraction logic
 
