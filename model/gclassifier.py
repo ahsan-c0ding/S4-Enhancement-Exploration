@@ -106,25 +106,31 @@ class GalaxyClassifierS4D(nn.Module):
         assert H == 64 and W == 64, "Expected 64x64"
         assert C == self.hilbert_channels, f"Expected {self.hilbert_channels} channels"
 
-        # Hilbert scan: 2D -> 1D
+        # 1. Hilbert scan: 2D -> 1D
         x_seq = self.hilbert_scan(x)  # (B,4096,C)
 
-        # Input projection: C -> d_model
+        # 2. Input projection: C -> d_model
         x_proj = self.uproject(x_seq)  # (B,4096,d_model)
 
-        # S4D layer 1 + GELU
-        a1 = self.act1(self.s4_1(x_proj))  # (B,4096,d_model)
+        # 3. S4D layer 1 + GELU
+        # FIX: S4D returns (y, state), we only want y (index 0)
+        s4_out1, _ = self.s4_1(x_proj)
+        a1 = self.act1(s4_out1)  # (B,4096,d_model)
 
-        # S4D layer 2 + GELU
-        a2 = self.act2(self.s4_2(a1))      # (B,4096,d_model)
+        # 4. S4D layer 2 + GELU
+        # FIX: Unpack tuple here too
+        s4_out2, _ = self.s4_2(a1)
+        a2 = self.act2(s4_out2)      # (B,4096,d_model)
 
-        # Take last timestep
+        # 5. Take last timestep
         last = self.take_last(a2)          # (B,d_model)
 
-        # Classifier: d_model -> num_classes
+        # 6. Classifier: d_model -> num_classes
         logits = self.fc(last)             # (B,4)
 
         # Return logits or softmax
         if return_logits:
             return logits
         return self.softmax(logits)
+
+        #raise NotImplementedError("Forward method not implemented yet.")
