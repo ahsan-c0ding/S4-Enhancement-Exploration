@@ -109,8 +109,8 @@ class HilbertScan(nn.Module):
         for d in range(n * n):
             x, y = self._d2xy(n, d)
             # GalaxyMNIST is 64x64, power of 2
-            if x < 64 and y < 64:
-                indices.append(y * 64 + x)
+            if x < n and y < n:
+                indices.append(y * n + x)
         return torch.LongTensor(indices)
 
     def forward(self, x):
