@@ -40,6 +40,16 @@ class HilbertScan(nn.Module):
         indices = self.get_hilbert_indices(64)
         self.register_buffer('indices', indices)
 
+    def _rot(self, s, x, y, rx, ry):
+    
+        if ry == 0:
+            if rx == 1:
+                x = s - 1 - x
+                y = s - 1 - y
+            x, y = y, x
+        return x, y
+
+
     def _d2xy(self, n, d):
         """
         Convert 1D Hilbert curve distance to 2D coordinates.
@@ -59,8 +69,23 @@ class HilbertScan(nn.Module):
         tuple of int
             (x, y) coordinates in the grid.
         """
-        # TODO: Implement the d2xy conversion algorithm
-        raise NotImplementedError("This method should be implemented to convert d to (x, y).")
+        x = 0
+        y = 0
+        t = d
+        s = 1
+
+        while s < n:
+            rx = (t // 2) & 1
+            ry = (t ^ rx) & 1
+
+            x, y = self._rot(s, x, y, rx, ry)
+            x += s * rx
+            y += s * ry
+
+            t //= 4
+            s *= 2
+
+        return x, y
 
     def get_hilbert_indices(self, n):
         """
