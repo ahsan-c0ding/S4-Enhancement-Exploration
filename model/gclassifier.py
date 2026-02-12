@@ -102,5 +102,29 @@ class GalaxyClassifierS4D(nn.Module):
             If return_logits=False: Output probabilities of shape (B, num_classes),
             representing the softmax probability distribution over classes.
         """
-        # TODO: Implement the forward pass
-        raise NotImplementedError("Forward method not implemented yet.")
+        B, C, H, W = x.shape
+        assert H == 64 and W == 64, "Expected 64x64"
+        assert C == self.hilbert_channels, f"Expected {self.hilbert_channels} channels"
+
+        # Hilbert scan: 2D -> 1D
+        x_seq = self.hilbert_scan(x)  # (B,4096,C)
+
+        # Input projection: C -> d_model
+        x_proj = self.uproject(x_seq)  # (B,4096,d_model)
+
+        # S4D layer 1 + GELU
+        a1 = self.act1(self.s4_1(x_proj))  # (B,4096,d_model)
+
+        # S4D layer 2 + GELU
+        a2 = self.act2(self.s4_2(a1))      # (B,4096,d_model)
+
+        # Take last timestep
+        last = self.take_last(a2)          # (B,d_model)
+
+        # Classifier: d_model -> num_classes
+        logits = self.fc(last)             # (B,4)
+
+        # Return logits or softmax
+        if return_logits:
+            return logits
+        return self.softmax(logits)
