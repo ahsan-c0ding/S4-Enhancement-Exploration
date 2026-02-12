@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 class TakeLastTimestep(nn.Module):
@@ -27,4 +28,38 @@ class TakeLastTimestep(nn.Module):
     """
     def forward(self, x):
         # TODO: Implement the forward method to extract the last timestep
-        raise NotImplementedError("TakeLastTimestep forward method not implemented yet.")
+        #raise NotImplementedError("TakeLastTimestep forward method not implemented yet.")
+        output = x[:, -1, :]
+        return output
+
+"""
+if __name__ == "__main__":
+    print("Testing tlts code")
+
+    layer = TakeLastTimestep()
+    print("Layer established")
+
+    x = torch.randn(3, 6, 2)
+    print(f"Input shape: {x.shape}")
+
+    output = layer(x)
+    print(f"Output shape: {output.shape}")
+    print(f"Expected (3, 2): {output.shape == (3, 2)}")
+    print(f"Match? {torch.allclose(x[0, -1, :], output[0, :])}")
+
+    print("Successful")
+"""
+"""
+Explaination:
+The TakeLastTimeStep layer transforms an input tensor of shape (B, L, D) 
+into an output tensor of shape (B, D) by indexing the last position.
+The hidden state at position L has been updated by all L previous inputs
+and by the time model reaches position L-1, which is the last time step, 
+the state has came across and collected information from all inputs u(0) 
+through u(L-1) and therefore the (B, D) tensor at the final position
+serves as a compressed summary of the entire (B, L, D) sequence.
+This is identical to how RNNs, LSTMs, and GRUs use their final hidden state
+for classification tasks — the last timestep naturally accumulates the 
+history of the whole sequence through the recurrent processes.
+"""
+
