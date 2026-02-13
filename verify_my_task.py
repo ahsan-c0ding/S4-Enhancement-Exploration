@@ -13,6 +13,6 @@ try:
     print(f"Input shape: {dummy_input.shape}")
     print(f"Output shape: {output.shape}")
     if output.shape == (2, 4):
-        print("✅ SUCCESS: Forward pass implementation is correct!")
+        print(" SUCCESS Forward pass implementation is correct!")
 except Exception as e:
-    print(f"❌ ERROR in implementation: {e}")
+    print(f" ERROR in implementation: {e}")
