@@ -96,6 +96,24 @@ class GalaxyClassifierS4D(nn.Module):
         # GRAND TOTAL: 128 + 8,320 + 8,320 + 260 = 17,028 Parameters
         # -------------------------------------------------------------------------
 
+
+
+        # -------------------------------------------------------------------------
+        # FLOPS ESTIMATION (Task 8.5)
+        # Sequence Length L = 4096, d_model = 64, C = 1
+        # -------------------------------------------------------------------------
+        # 1. Input Projection: L * C * d_model
+        #    4096 * 1 * 64 = 262,144 Ops
+        #
+        # 2. S4D Layers (x2): 2 * (L * log2(L) * d_model)
+        #    2 * (4096 * 12 * 64) = 6,291,456 Ops
+        #
+        # 3. Classifier Head: d_model * Classes
+        #    64 * 4 = 256 Ops
+        #
+        # GRAND TOTAL: ~6.55 Million Operations per forward pass
+        # -------------------------------------------------------------------------
+
     def forward(self, x, return_logits=False):
         """
         Forward pass of the PixelS4Galaxy model.
@@ -121,15 +139,15 @@ class GalaxyClassifierS4D(nn.Module):
         assert H == 64 and W == 64, "Expected 64x64"
         assert C == self.hilbert_channels, f"Expected {self.hilbert_channels} channels"
 
-        # 1. Hilbert scan: 2D -> 1D
+        # 1. Hilbert scan: 2D > 1D
         x_seq = self.hilbert_scan(x)  # (B,4096,C)
 
-        # 2. Input projection: C -> d_model
+        # 2. Input projection: C > d_model
         x_proj = self.uproject(x_seq)  # (B,4096,d_model)
 
         # 3. S4D layer 1 + GELU
         s4_out1, _ = self.s4_1(x_proj)
-        a1 = self.act1(s4_out1)  # (B,4096,d_model)
+        a1 = self.act1(s4_out1)  # (B,4096,d_model
 
         # 4. S4D layer 2 + GELU
         s4_out2, _ = self.s4_2(a1)
@@ -138,12 +156,21 @@ class GalaxyClassifierS4D(nn.Module):
         # 5. Take last timestep
         last = self.take_last(a2)          # (B,d_model)
 
-        # 6. Classifier: d_model -> num_classes
+        # 6. Classifier: d_model > num_classes
         logits = self.fc(last)             # (B,4)
 
         # Return logits or softmax
         if return_logits:
             return logits
         return self.softmax(logits)
+
+# basically this function takes the image and turns it into a sequence
+        # first we check the shape to make sure its 64x64
+        # then the hilbert scan flattens the 2D image into a long 1D list of pixels
+        # after that we project it up to hidden size using a linear layer
+        # then it goes through two S4 layers with GELU activation in between to learn features
+        # since its a sequence model we only care about the very last timestep which has the summary
+        # finally we pass that last step to the linear classifier to get the 4 class scores
+        # and if we need probs we apply softmax otherwise just return the raw logits
 
         #raise NotImplementedError("Forward method not implemented yet.")
