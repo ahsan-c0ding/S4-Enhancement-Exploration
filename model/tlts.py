@@ -28,7 +28,6 @@ class TakeLastTimestep(nn.Module):
     """
     def forward(self, x):
         # TODO: Implement the forward method to extract the last timestep
-        #raise NotImplementedError("TakeLastTimestep forward method not implemented yet.")
         output = x[:, -1, :]
         return output
 
