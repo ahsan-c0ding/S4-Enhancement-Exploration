@@ -81,6 +81,21 @@ class GalaxyClassifierS4D(nn.Module):
         # Softmax for output probabilities
         self.softmax = nn.Softmax(dim=-1)
 
+
+       # -------------------------------------------------------------------------
+        # PARAMETER COUNT VERIFICATION (Task 8.4)
+        # Verified with torchinfo.summary()
+        # -------------------------------------------------------------------------
+        # 1. Input Projection: (1 * 64) + 64 = 128 params
+        # 2. S4D Layer 1 (Optimized N/2 symmetry): 
+        #    Per feature: 130 params (vs 258 naive)
+        #    Total: 64 * 130 = 8,320 params
+        # 3. S4D Layer 2: Same as Layer 1 = 8,320 params
+        # 4. Classifier Head: (64 * 4) + 4 = 260 params
+        # 
+        # GRAND TOTAL: 128 + 8,320 + 8,320 + 260 = 17,028 Parameters
+        # -------------------------------------------------------------------------
+
     def forward(self, x, return_logits=False):
         """
         Forward pass of the PixelS4Galaxy model.
@@ -113,12 +128,10 @@ class GalaxyClassifierS4D(nn.Module):
         x_proj = self.uproject(x_seq)  # (B,4096,d_model)
 
         # 3. S4D layer 1 + GELU
-        # FIX: S4D returns (y, state), we only want y (index 0)
         s4_out1, _ = self.s4_1(x_proj)
         a1 = self.act1(s4_out1)  # (B,4096,d_model)
 
         # 4. S4D layer 2 + GELU
-        # FIX: Unpack tuple here too
         s4_out2, _ = self.s4_2(a1)
         a2 = self.act2(s4_out2)      # (B,4096,d_model)
 
