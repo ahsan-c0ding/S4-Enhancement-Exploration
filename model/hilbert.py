@@ -73,15 +73,15 @@ class HilbertScan(nn.Module):
         y = 0
         t = d
         s = 1
-
+#Determine which quadrant of the current square this distance is in
         while s < n:
             rx = (t // 2) & 1
             ry = (t ^ rx) & 1
-
+#Rotate and/or reflect coordinates depending on quadrant
             x, y = self._rot(s, x, y, rx, ry)
             x += s * rx
             y += s * ry
-
+#Move to next level of recursion (divide distance by 4 for next smaller square)
             t //= 4
             s *= 2
 
