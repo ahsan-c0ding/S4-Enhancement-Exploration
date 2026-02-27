@@ -42,11 +42,11 @@ class HilbertScan(nn.Module):
 
     def _rot(self, s, x, y, rx, ry):
     
-        if ry == 0:
-            if rx == 1:
-                x = s - 1 - x
+        if ry == 0:                  # Bottom half of the current square
+            if rx == 1:              # Bottom-right quadrant
+                x = s - 1 - x        # Reflect over diagonal
                 y = s - 1 - y
-            x, y = y, x
+            x, y = y, x              # Swap x and y for 90° rotation
         return x, y
 
 
