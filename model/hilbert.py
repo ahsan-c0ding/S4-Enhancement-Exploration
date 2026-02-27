@@ -134,3 +134,11 @@ class HilbertScan(nn.Module):
         x = x[:, :, self.indices]      # Reorder according to Hilbert: (B, C, H*W)
         x = x.permute(0, 2, 1)         # (B, seq_len, C) so sequence dimension is 1D
         return x
+if __name__ == "__main__":
+    import torch
+
+    img = torch.arange(64*64).view(1,1,64,64).float()
+    hilbert = HilbertScan()
+    out = hilbert(img)
+
+    print(out[0, :20, 0])
