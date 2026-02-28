@@ -71,7 +71,8 @@ space-state-model/
 | | test_s4_equivalence.py # Verifies recurrent vs convolution S4 equivalence
 │ |
 | └── test_s4d_fft_conv.py # Benchmarks FFT vs direct convolution in S4D
-└──```
+└─
+```
 
 ## Installation
 
