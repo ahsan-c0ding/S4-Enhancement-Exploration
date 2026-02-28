@@ -19,9 +19,13 @@ This base repository contains:
 ```
 space-state-model/
 ├── README.md # Project overview, setup instructions, and usage guide
+|
 ├── requirements.txt # Python dependencies required to run the project
+│
 ├── main.py # Interactive visualization tool (e.g., exploring models/outputs)
+│
 ├── utils.py # Helper functions used throughout the project
+│
 ├── Hilbertplot.py # Create Hilbert Plot image into /images folder
 │
 ├── model/ # model implementations
@@ -40,16 +44,21 @@ space-state-model/
 │
 ├── export/ # Scripts for exporting and testing trained models
 │ ├── export_weights.py # Saves trained model weights
+│ │
 │ ├── generate_test_data.py # Generates test inputs for evaluation
+│ │
 │ └── run_test.py # Runs inference using exported models
 │
 ├── scripts/ # Training and execution scripts
 │ ├── train.ipynb # Notebook-based training pipeline
+│ │
 │ └── train.py # Script-based training
 │
 └── tests/ # Unit tests and validation scripts
 ├── test_forward.py # Tests forward pass of models
+│
 ├── test_s4_equivalence.py # Verifies recurrent vs convolution S4 equivalence
+│
 └── test_s4d_fft_conv.py # Benchmarks FFT vs direct convolution in S4D
 ```
 
