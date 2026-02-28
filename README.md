@@ -85,21 +85,21 @@ pip install -r requirements.txt
 
 ### Core Components
 
-**`model/gclassifier.py`** - Galaxy classifier architecture: COMPLETED
+**`model/gclassifier.py`** - Galaxy classifier architecture:
 - `GalaxyClassifierS4D` - Main model combining Hilbert scanning, S4 layers, classification head
-- TODO: Complete `forward()` method
+- Completed `forward()` method
 
-**`model/s4d.py`** - Diagonal S4 layer: COMPLETED
+**`model/s4d.py`** - Diagonal S4 layer: 
 - Fully implemented reference implementation
 - Study for S4 architecture patterns, FFT convolution, diagonal parameterization
 
-**`model/hilbert.py`** - Hilbert curve utilities: COMPLETED
+**`model/hilbert.py`** - Hilbert curve utilities: 
 - `HilbertScan` - Converts 2D images to 1D sequences
-- TODO: Complete `_d2xy()` method
+- Completed `_d2xy()` method
 
-**`model/tlts.py`** - Sequence pooling: COMPLETED
+**`model/tlts.py`** - Sequence pooling: 
 - `TakeLastTimestep` - Extracts final timestep for classification
-- TODO: Implement extraction logic
+- Implemented extraction logic
 
 **`model/functions.py`** - Helper utilities
 - Matrix operations, discretization methods
