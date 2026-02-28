@@ -117,7 +117,6 @@ The notebook includes:
 - Model initialization
 - Training loop with validation
 - Logging and visualization
-- TODO markers for required implementations
 
 ## Interactive Visualization Tool
 
@@ -156,30 +155,9 @@ Examples:
 - **R** - Random sample
 - **Q** - Quit
 
-## Implementation Tasks
-
-Primary TODOs:
-
-1. **`model/gclassifier.py`** - Complete `GalaxyClassifierS4D.forward()`
-   - Connect Hilbert scanning, linear projection, S4 blocks, GELU activation, final timestep extraction, classification head
-   - Handle tensor shapes: (B, C, 64, 64) → (B, 4)
-
-2. **`model/hilbert.py`** - Implement `_d2xy()`
-   - Convert 1D distance along Hilbert curve to 2D (x, y) coordinates
-   - Recursive algorithm for arbitrary power-of-two grid sizes
-
-3. **`model/tlts.py`** - Implement `TakeLastTimestep.forward()`
-   - Extract final timestep from sequence tensor
-   - Shape: (B, L, D) → (B, D)
-
-4. **`train.ipynb`** - Fill TODO sections
-   - Training loop implementation
-   - Validation/test evaluation
-   - Visualization functions
-
 ## Fixed Constraints
 
-Do not modify these values (required for multi-milestone compatibility):
+These values are fixed for the required multi-milestone compatibility:
 
 - `d_model = 64` - Hidden dimension
 - `d_state = 64` - State space dimension
