@@ -75,7 +75,8 @@ space-state-model/
 
 ## Installation
 
-```bash
+```
+bash
 cd space-state-model
 pip install -r requirements.txt
 ```
