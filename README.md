@@ -65,7 +65,7 @@ space-state-model/
 │ │
 │ └── train.py # Script-based training
 │
-└── tests/ # Unit tests and validation scripts
+├──  tests/ # Unit tests and validation scripts
 | ├── test_forward.py # Tests forward pass of models
 │ |
 | | test_s4_equivalence.py # Verifies recurrent vs convolution S4 equivalence
