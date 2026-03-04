@@ -1,8 +1,6 @@
 #ifndef NN_H
 #define NN_H
 
-#include <math.h>
-
 #define IMG_SIZE 64
 #define SEQ_LEN 4096
 #define D_MODEL 64
