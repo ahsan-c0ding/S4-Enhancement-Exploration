@@ -93,5 +93,33 @@ float my_tanh(float x){
     return (expPos - expNeg) / (expPos + expNeg);
 }
 
-//pow(x) 
+// pow(x) for only integers
+float my_pow_int(float x, int y){
+    float result = 1.0f;
+    if (y < 0) {
+        x = 1.0f / x;
+        y = -y;
+    }
+    for (int i = 0; i < y; i++) {
+        result *= x;
+    }
+    return result;
+}
+
+// pow for general exponentiation
+float my_pow(float x, float y){
+    if(x <= 0) return 0;
+    return my_exp(y * my_log(x));
+}
+
+// HIGH-PRECISION SQRT (Babylonian Method)
+float my_sqrt(float x){
+    if(x <= 0.0f) return 0.0f;
+    float res = x;
+    // 10 iterations of Newton-Raphson is enough to max out 32-bit float precision
+    for(int i = 0; i < 10; i++) {
+        res = 0.5f * (res + x / res);
+    }
+    return res;
+}
 
