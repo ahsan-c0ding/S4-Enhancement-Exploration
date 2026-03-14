@@ -8,16 +8,6 @@
 #define N_CLASSES 4	//4 types of galaxy
 #define IN_CHANNELS 1	//1 becuase of grayscale
 
-//This struct will be removed later
-/*
-typedef struct {
-    float log_dt[D_MODEL];
-    float log_A_real[D_MODEL][D_STATE/2];
-    float A_imag[D_MODEL][D_STATE/2];
-    float C[D_MODEL][D_STATE/2][2];
-    float D[D_MODEL];
-} S4DParams;
-*/
 
 //Reorders 2D image pixels into 1D sequence following Hilbert curve.
 void hilbert_scan(
