@@ -51,18 +51,27 @@ The Hilbert scan preserves spatial locality when transforming the image into a s
 
 ```
 .
-├── main.c           # Standalone inference application
-├── test.c           # End-to-end validation against Python reference
-├── nn.c             # Neural network implementation
-├── nn.h             # Model configuration and layer interfaces
-├── math.c           # Custom math library
-├── math.h           # Math function declarations
-│
-├── Makefile         # Build configuration
-├── benchmark.sh     # Compiler optimization benchmarking script
-│
-├── galaxy_app       # Executable (built from main.c)
-└── test_app         # Executable (built from test.c)
+├── c/                         # Core C implementation 
+│   ├── main.c                 # Standalone inference demo application 
+│   ├── test.c                 # Layer-by-layer validation program 
+│   ├── nn.c                   # Neural network layers (S4D, Linear, GELU) 
+│   ├── nn.h                   # Layer declarations and model constants
+│   ├── math.c                 # Scratch math library (exp, log, sin, cos) 
+│   ├── math.h                 # Math library declarations
+│   ├── Makefile               # Build system for galaxy_app and test_app 
+│   └── benchmark.sh           # Script to measure -O0 through -Ofast
+├── model_params/              # Model weights folder
+│   └── model_weights.bin      # Binary file containing all parameters 
+├── test_data/                 # Validation data assets 
+│   ├── sample_*_img.bin       # 10 diverse test images 
+│   └── sample_*_ref.bin       # PyTorch intermediate reference outputs
+├── export/                    # Automation and visualization
+│   ├── run_test.py            # Aggregates results for all 10 samples 
+│   ├── generate_test_data.py  # Exports binaries from PyTorch 
+│   ├── plot_errors.py         # Generates the MSE distribution chart 
+│   └── charts/                # Folder for PNG performance graphs 
+├── README.md                  # Build and usage instructions 
+└── m2_0x43.pdf                # Final comprehensive report
 ```
 
 External assets required at runtime:
