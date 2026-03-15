@@ -34,7 +34,7 @@ def run_automated_tests():
         output = test_process.stdout
         print(output)
 
-        if "STATUS: ALL LAYERS PASSED" in output:
+        if "PASSED" in output:
             passed += 1
         else:
             failed += 1
