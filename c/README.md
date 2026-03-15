@@ -148,7 +148,7 @@ The project includes an **end-to-end validation tool** that compares C inference
 Run:
 
 ```bash
-./test_app
+./test_app ../test_data/sample_0
 ```
 
 The program computes:
