@@ -85,10 +85,10 @@ make clean
 
 # Running Inference
 
-Run the standalone inference application:
+Run the standalone inference application by passing a test image as an argument:
 
 ```bash
-./galaxy_app
+./galaxy_app ../test_data/sample_0_img.bin
 ```
 
 The program performs the following:
