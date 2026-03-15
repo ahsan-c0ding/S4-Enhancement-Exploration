@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
     }
     fclose(f_weights);
 
-    // FIX: Load the image specified in the command line argument
+    //  Load the image specified in the command line argument
     FILE *f_img = fopen(argv[1], "rb");
     if (!f_img) {
         printf(" Error: Could not find %s\n", argv[1]);
