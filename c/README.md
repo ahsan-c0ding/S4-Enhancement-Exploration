@@ -43,7 +43,6 @@ make
 The Hilbert scan preserves spatial locality when transforming the image into a sequence of length **4096**.
 
 ---
-
 # Repository Structure
 
 ```
