@@ -14,7 +14,8 @@ The classifier predicts one of four galaxy morphology classes:
 The pipeline includes **Hilbert curve scanning, sequence modeling using S4D layers, nonlinear activations, and final classification via softmax**.
 
 ---
-##  Quick Start (Clean Clone Setup)
+## Quick Start (Clean Clone Setup)
+
 To verify the implementation from a fresh clone, run the following:
 
 ```bash
@@ -26,6 +27,8 @@ make
 
 # 3. Run a sample inference demo
 ./galaxy_app ../test_data/sample_0_img.bin
+```
+
 # Features
 
 * Pure **C implementation** of a neural network inference pipeline
