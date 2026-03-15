@@ -44,7 +44,7 @@ The Hilbert scan preserves spatial locality when transforming the image into a s
 
 ---
 
-# Repository Structure
+## Repository Structure
 
 ```
 .
