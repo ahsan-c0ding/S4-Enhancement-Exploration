@@ -175,7 +175,7 @@ Passing thresholds ensure numerical equivalence between implementations.
 The rubric requires rigorous validation across multiple samples[cite: 751]. We provide a Python wrapper to automate layer-by-layer validation across the entire test suite. 
 
 ```bash
-cd export
+cd ../export
 python3 run_test.py
  ```
 ---
@@ -186,7 +186,7 @@ To reproduce the performance analysis and instruction reduction results found in
 Run the benchmarking script:
 
 ```bash
-cd c
+cd ../c
 bash benchmark.sh
 ```
 
