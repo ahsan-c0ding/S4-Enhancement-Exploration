@@ -51,27 +51,25 @@ The Hilbert scan preserves spatial locality when transforming the image into a s
 
 ```
 .
-├── c/                         # Core C implementation 
-│   ├── main.c                 # Standalone inference demo application 
-│   ├── test.c                 # Layer-by-layer validation program 
-│   ├── nn.c                   # Neural network layers (S4D, Linear, GELU) 
-│   ├── nn.h                   # Layer declarations and model constants
-│   ├── math.c                 # Scratch math library (exp, log, sin, cos) 
-│   ├── math.h                 # Math library declarations
-│   ├── Makefile               # Build system for galaxy_app and test_app 
-│   └── benchmark.sh           # Script to measure -O0 through -Ofast
-├── model_params/              # Model weights folder
-│   └── model_weights.bin      # Binary file containing all parameters 
-├── test_data/                 # Validation data assets 
-│   ├── sample_*_img.bin       # 10 diverse test images 
-│   └── sample_*_ref.bin       # PyTorch intermediate reference outputs
-├── export/                    # Automation and visualization
-│   ├── run_test.py            # Aggregates results for all 10 samples 
-│   ├── generate_test_data.py  # Exports binaries from PyTorch 
-│   ├── plot_errors.py         # Generates the MSE distribution chart 
-│   └── charts/                # Folder for PNG performance graphs 
-├── README.md                  # Build and usage instructions 
-└── m2_0x43.pdf                # Final comprehensive report
+├── c/                         # Core C implementation
+│   ├── main.c                 # Inference entry point
+│   ├── test.c                 # Validation entry point
+│   ├── nn.c                   # Layer implementations
+│   ├── nn.h                   # Layer headers
+│   ├── math.c                 # Math primitives
+│   ├── math.h                 # Math headers
+│   ├── Makefile               # Build system
+│   ├──benchmark.sh           # Optimization script
+|   └── README.md                  # Usage instructions
+├── model_params/              # Parameter storage
+│   └── model_weights.bin      # Binary weights
+├── test_data/                 # Validation split samples
+│   ├── sample_*_img.bin       # Test input images
+│   └── sample_*_ref.bin       # Python reference tensors
+└──export/                    # Automation and charts
+    ├── run_test.py            # Batch testing script
+    ├── plot_errors.py         # Error distribution plotter
+    └── charts/                # Figure storage 
 ```
 
 External assets required at runtime:
