@@ -14,7 +14,18 @@ The classifier predicts one of four galaxy morphology classes:
 The pipeline includes **Hilbert curve scanning, sequence modeling using S4D layers, nonlinear activations, and final classification via softmax**.
 
 ---
+##  Quick Start (Clean Clone Setup)
+To verify the implementation from a fresh clone, run the following:
 
+```bash
+# 1. Enter the source directory
+cd c
+
+# 2. Build the inference and test applications
+make
+
+# 3. Run a sample inference demo
+./galaxy_app ../test_data/sample_0_img.bin
 # Features
 
 * Pure **C implementation** of a neural network inference pipeline
@@ -25,6 +36,8 @@ The pipeline includes **Hilbert curve scanning, sequence modeling using S4D laye
 * **Benchmarking script** for compiler optimization analysis
 
 ---
+
+
 
 
 The Hilbert scan preserves spatial locality when transforming the image into a sequence of length **4096**.
@@ -145,14 +158,22 @@ PASSED (Predictions match Python closely!)
 Passing thresholds ensure numerical equivalence between implementations.
 
 ---
+##  Automated Batch Validation (Task 2)
+The rubric requires rigorous validation across multiple samples[cite: 751]. We provide a Python wrapper to automate layer-by-layer validation across the entire test suite. 
 
-# Benchmarking
+```bash
+cd export
+python3 run_test.py
+
+---
+# Benchmarking (Task 3)
 
 Compiler optimization levels can significantly affect runtime performance.
-
+To reproduce the performance analysis and instruction reduction results found in the report
 Run the benchmarking script:
 
 ```bash
+cd c
 bash benchmark.sh
 ```
 
@@ -206,6 +227,8 @@ Target tolerances:
 
 # Requirements
 
-* GCC or compatible C compiler
 * Binary model weights
 * Binary test input image
+* **Compiler**: GCC >= 7.0 (supporting C11 standard) 
+* **Python**: Version 3.11+ (required for automated validation scripts) 
+* **Tools**: Valgrind (required for instruction count analysis in Task 3) 
