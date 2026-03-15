@@ -212,7 +212,7 @@ done
 rm -f galaxy_bench
 EOF
 
-# Run it immediately to see the real times!
+# Run it immediately
 bash benchmark.sh
 ```
 
