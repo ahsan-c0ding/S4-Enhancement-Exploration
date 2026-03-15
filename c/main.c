@@ -4,9 +4,9 @@
 
 #define WEIGHTS_SIZE_FLOATS 21124
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) { 
     if (argc != 2) {
-        printf("Usage: %s <input_image.bin>\n", argv[0]);
+        printf("Usage: %s <input_image.bin>\n", argv[0]); //Ask for command line input
         return 1;
     }
 
@@ -43,9 +43,7 @@ int main(int argc, char *argv[]) {
     
     model_forward(input_image, output_probs, model_weights, hilbert_indices);
 
-    printf("\n====================================\n");
-    printf(" Galaxy Class Predictions\n");
-    printf("====================================\n");
+    printf("\nGalaxy Class Predictions\n");
     
     const char* class_names[4] = {
         "Round Elliptical", 
@@ -62,9 +60,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    printf("====================================\n");
-    printf(" FINAL PREDICTION: %s\n", class_names[best_class]);
-    printf("====================================\n");
+    printf("\nFinal Prediction: %s\n", class_names[best_class]);
 
     return 0;
 }
