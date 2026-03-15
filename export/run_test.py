@@ -4,9 +4,7 @@ import os
 import glob
 
 def run_automated_tests():
-    print("============================================")
     print("Starting Automated Layer-by-Layer Validation")
-    print("============================================")
 
     print("Compiling test_app in ../c...")
     compile_process = subprocess.run(["make", "test_app"], cwd="../c", capture_output=True, text=True)
@@ -41,12 +39,10 @@ def run_automated_tests():
         else:
             failed += 1
 
-    print("\n============================================")
     print("Aggregate Test Results:")
     print(f"Total Samples: {total_samples}")
     print(f"Passed: {passed}")
     print(f"Failed: {failed}")
-    print("============================================")
 
     if failed > 0: sys.exit(1)
     else: sys.exit(0)
