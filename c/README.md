@@ -67,8 +67,11 @@ The Hilbert scan preserves spatial locality when transforming the image into a s
 │   ├── sample_*_img.bin       # Test input images
 │   └── sample_*_ref.bin       # Python reference tensors
 └──export/                    # Automation and charts
-    ├── run_test.py            # Batch testing script
+    ├── generate_test_data.py  # Data generation script
+    ├── plot_benchmarks.py     # Timing analysis plotter 
     ├── plot_errors.py         # Error distribution plotter
+    ├── plot_instructions.py   # Instruction count plotter 
+    ├── run_test.py            # Batch testing script 
     └── charts/                # Figure storage 
 ```
 
