@@ -65,7 +65,10 @@ int main(int argc, char *argv[]) {
     // Load Weights
     FILE *f_w = fopen("../model_params/model_weights.bin", "rb");
     if (!f_w) return 1;
-    fread(raw_weights, sizeof(float), WEIGHTS_SIZE_FLOATS, f_w);
+    if (fread(raw_weights, sizeof(float), WEIGHTS_SIZE_FLOATS, f_w) != WEIGHTS_SIZE_FLOATS) {
+        printf("Error reading weights file.\n");
+        return 1;
+    }
     fclose(f_w);
 
     // Load Input Image
