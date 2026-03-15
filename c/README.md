@@ -186,7 +186,33 @@ To reproduce the performance analysis and instruction reduction results found in
 Run the benchmarking script:
 
 ```bash
-cd ../c
+cat << 'EOF' > benchmark.sh
+#!/bin/bash
+levels=("-O0" "-O1" "-O2" "-O3" "-Ofast")
+echo "Optimization Level | Inference Time (seconds)"
+echo "-------------------|------------------------"
+
+# We define the image path here
+IMAGE="../test_data/sample_0_img.bin"
+
+for opt in "${levels[@]}"; do
+    # Added -fno-strict-aliasing so GCC -O3 doesn't break your Hilbert index pointer!
+    gcc $opt -fno-strict-aliasing -Wall -Wextra -o galaxy_bench main.c nn.c math.c
+    
+    start=$(date +%s.%N)
+    # Actually pass the image argument to the program!
+    ./galaxy_bench "$IMAGE" > /dev/null 2>&1
+    end=$(date +%s.%N)
+    
+    runtime=$(echo "$end - $start" | bc)
+    
+    # %.3f rounds it to 3 decimal places so it looks clean
+    printf "%-18s | %.3f\n" "$opt" "$runtime"
+done
+rm -f galaxy_bench
+EOF
+
+# Run it immediately to see the real times!
 bash benchmark.sh
 ```
 
