@@ -43,28 +43,26 @@ make
 The Hilbert scan preserves spatial locality when transforming the image into a sequence of length **4096**.
 
 ---
+
 # Repository Structure
 
 ```
 .
-├── c
-│   ├── main.c
-│   ├── test.c
-│   ├── nn.c
-│   ├── nn.h
-│   ├── math.c
-│   ├── math.h
-│   ├── Makefile
-│   └── benchmark.sh
+├── main.c           # Standalone inference application
+├── test.c           # End-to-end validation against Python reference
+├── nn.c             # Neural network implementation
+├── nn.h             # Model configuration and layer interfaces
+├── math.c           # Custom math library
+├── math.h           # Math function declarations
 │
-├── model_params
-│   └── model_weights.bin
+├── Makefile         # Build configuration
+├── benchmark.sh     # Compiler optimization benchmarking script
 │
-└── test_data
-    └── sample_0_img.bin
+├── galaxy_app       # Executable (built from main.c)
+└── test_app         # Executable (built from test.c)
 ```
 
-External runtime assets:
+External assets required at runtime:
 
 ```
 ../model_params/model_weights.bin
