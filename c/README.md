@@ -177,9 +177,9 @@ The rubric requires rigorous validation across multiple samples[cite: 751]. We p
 ```bash
 cd export
 python3 run_test.py
-
+ ```
 ---
-# Benchmarking (Task 3)
+##  Benchmarking (Task 3)
 
 Compiler optimization levels can significantly affect runtime performance.
 To reproduce the performance analysis and instruction reduction results found in the report
