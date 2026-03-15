@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
     }
     fclose(f_weights);
 
-    //  Load the image specified in the command line argument
+    //  Load the image specified in the command line argument from ../test_data/<file_name>.bin
     FILE *f_img = fopen(argv[1], "rb");
     if (!f_img) {
         printf(" Error: Could not find %s\n", argv[1]);
@@ -44,14 +44,16 @@ int main(int argc, char *argv[]) {
     model_forward(input_image, output_probs, model_weights, hilbert_indices);
 
     printf("\nGalaxy Class Predictions\n");
-    
+
+    //C-type string (char*) array
     const char* class_names[4] = {
         "Round Elliptical", 
         "In-between Elliptical", 
         "Cigar-shaped Elliptical", 
         "Edge-on Disk"
     };
-    
+
+    //loop over all classes and find highest probablity
     int best_class = 0;
     for (int i = 0; i < N_CLASSES; i++) {
         printf("Class %d [%-24s]: %6.2f%%\n", i, class_names[i], output_probs[i] * 100.0f);
