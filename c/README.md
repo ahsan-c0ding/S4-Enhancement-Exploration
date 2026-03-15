@@ -48,21 +48,24 @@ The Hilbert scan preserves spatial locality when transforming the image into a s
 
 ```
 .
-├── main.c           # Standalone inference application
-├── test.c           # End-to-end validation against Python reference
-├── nn.c             # Neural network implementation
-├── nn.h             # Model configuration and layer interfaces
-├── math.c           # Custom math library
-├── math.h           # Math function declarations
+├── c
+│   ├── main.c
+│   ├── test.c
+│   ├── nn.c
+│   ├── nn.h
+│   ├── math.c
+│   ├── math.h
+│   ├── Makefile
+│   └── benchmark.sh
 │
-├── Makefile         # Build configuration
-├── benchmark.sh     # Compiler optimization benchmarking script
+├── model_params
+│   └── model_weights.bin
 │
-├── galaxy_app       # Executable (built from main.c)
-└── test_app         # Executable (built from test.c)
+└── test_data
+    └── sample_0_img.bin
 ```
 
-External assets required at runtime:
+External runtime assets:
 
 ```
 ../model_params/model_weights.bin
