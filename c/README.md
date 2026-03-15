@@ -221,11 +221,11 @@ Example output:
 ```
 Optimization Level | Inference Time (seconds)
 -------------------|------------------------
--O0                | 2.31
--O1                | 1.42
--O2                | 0.88
--O3                | 0.81
--Ofast             | 0.78
+-O0                | 7.704
+-O1                | 4.792
+-O2                | 4.160
+-O3                | 4.096
+-Ofast             | 4.023
 ```
 
 This script automatically recompiles the model at different optimization levels and measures execution time.
