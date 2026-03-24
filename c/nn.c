@@ -34,6 +34,27 @@ void hilbert_scan(float input[IN_CHANNELS][IMG_SIZE][IMG_SIZE], float output[SEQ
     }
 }
 
+//Generic linear layer implementation (linear uproject & fc kept for compatibility with main.c and test.c)
+void linear(
+    const float* input,
+    float* output,
+    const float* weight,
+    const float* bias,
+    int batch_size,
+    int in_features,
+    int out_features
+) {
+    for (int i = 0; i < batch_size; i++) {
+        for (int j = 0; j < out_features; j++) {
+            float acc = bias[j];
+            for (int k = 0; k < in_features; k++) {
+                acc += input[i * in_features + k] * weight[j * in_features + k];
+            }
+            output[i * out_features + j] = acc;
+        }
+    }
+}
+
 
 void linear_uproject(
     float input[SEQ_LEN][IN_CHANNELS],

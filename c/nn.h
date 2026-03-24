@@ -16,6 +16,17 @@ void hilbert_scan(
     const int* hilbert_indices			        //Pre-computed indices from weights go here
 );
 
+// Generic Linear Layer: handles both sequence and vector inputs
+void linear(
+    const float* input,    // flat input  [batch_size × in_features]
+    float* output,         // flat output [batch_size × out_features]
+    const float* weight,   // [out_features × in_features] row-major
+    const float* bias,     // [out_features]
+    int batch_size,
+    int in_features,
+    int out_features
+);
+
 //Input Projection Layer: (4096, C) -> (4096, 64)
 void linear_uproject(
     float input[SEQ_LEN][IN_CHANNELS],			//Input sequence of shape (4096, C) from Hilbert scan
