@@ -8,6 +8,7 @@
 .global my_tanh
 .global my_sqrt
 .global my_pow
+.global my_log
 
 # my_exp(x) - Exponential using Taylor series
 # Input fa0 = x, return fa0 = e^x
@@ -73,54 +74,43 @@ exp_exit:
 # Return: fa0 = sin(x)
 # ============================================================
 my_sin:
-    # Reduce x to [-π, π]
-    li t0, 0x40490FDB        # π = 3.141592653589793
-    fmv.w.x ft0, t0
-    fmv.s ft1, fa0           # ft1 = x
-
-    # Range reduction - simple version (for now)
-    # We'll keep it simple for initial implementation
-
     fmv.s ft0, fa0           # ft0 = x
-    li t0, 1
-    fcvt.s.w ft1, t0         # ft1 = 1.0
-    fmv.s ft2, ft0           # ft2 = term = x
-    fmv.s ft3, ft1           # ft3 = result = 0
-    li t0, 1                 # i = 1
-    fmv.s ft4, ft0           # x_sq = x * x
-    fmul.s ft4, ft4, ft4
+
+    # Initialize
+    li t0, 0
+    fcvt.s.w ft1, t0         # result = 0.0
+    fmv.s ft2, ft0           # term = x
+
+    li t0, 1                 # n = 1
+    fmul.s ft3, ft0, ft0     # x^2
 
 sin_loop:
-    # Add term to result
-    fadd.s ft3, ft3, ft2
+    # result += term
+    fadd.s ft1, ft1, ft2
 
-    # Next term: term = -term * x^2 / ((i+1)*(i+2))
-    fneg.s ft2, ft2          # -term
-    fmul.s ft2, ft2, ft4     # * x^2
+    # term = -term * x^2
+    fneg.s ft2, ft2
+    fmul.s ft2, ft2, ft3
 
-    # Calculate denominator = (i+1)*(i+2)
-    addi t0, t0, 1
-    fcvt.s.w ft5, t0
-    addi t0, t0, 1
-    fcvt.s.w ft6, t0
-    fmul.s ft5, ft5, ft6
-    fdiv.s ft2, ft2, ft5
+    # denominator = (2n)(2n+1)
+    slli t1, t0, 1           # t1 = 2n
+    addi t2, t1, 1           # t2 = 2n+1
 
-    # Check convergence
-    fabs.s ft6, ft2
-    li t1, 0x33D6BF95        # 1e-7
-    fmv.w.x ft7, t1
-    flt.s t2, ft6, ft7
+    fcvt.s.w ft4, t1
+    fcvt.s.w ft5, t2
+    fmul.s ft4, ft4, ft5     # ft4 = denom
 
-    # i += 2
-    addi t0, t0, 1
-    li t1, 15
-    bge t0, t1, sin_done
+    fdiv.s ft2, ft2, ft4     # term /= denom
 
-    beq t2, zero, sin_loop
+    addi t0, t0, 1           # n++
+
+    li t3, 10                # iterations cap (can tune)
+    bge t0, t3, sin_done
+
+    j sin_loop
 
 sin_done:
-    fmv.s fa0, ft3
+    fmv.s fa0, ft1
     ret
 
 # ============================================================
@@ -130,40 +120,45 @@ sin_done:
 # Return: fa0 = cos(x)
 # ============================================================
 my_cos:
-    fmv.s ft0, fa0
+    fmv.s ft0, fa0   # x
+
+    # term = 1.0
     li t0, 1
-    fcvt.s.w ft1, t0         # ft1 = result = 1.0
-    fmv.s ft2, ft1           # ft2 = term = 1.0
-    fmul.s ft3, ft0, ft0     # ft3 = x^2
-    li t0, 0                 # i = 0
+    fcvt.s.w ft2, t0  # ft2 = term = 1.0
+
+    # result = 0.0  
+    li t0, 0
+    fcvt.s.w ft1, t0   # ft1 = result = 0.0
+
+    # x^2
+    fmul.s ft3, ft0, ft0
+
+    li t0, 0  # k = 0
 
 cos_loop:
-    # Next term: term = -term * x^2 / ((i+1)*(i+2))
+    # result += term
+    fadd.s ft1, ft1, ft2
+
+    # numerator = -term * x^2
     fneg.s ft2, ft2
     fmul.s ft2, ft2, ft3
 
-    addi t0, t0, 1
-    fcvt.s.w ft4, t0
-    addi t0, t0, 1
-    fcvt.s.w ft5, t0
-    fmul.s ft4, ft4, ft5
+    # denominator = (2k+1)(2k+2)
+    slli t1, t0, 1           # 2k
+    addi t2, t1, 1           # 2k+1
+    addi t3, t1, 2           # 2k+2
+
+    fcvt.s.w ft4, t2
+    fcvt.s.w ft5, t3
+    fmul.s ft4, ft4, ft5     # denom
+
     fdiv.s ft2, ft2, ft4
 
-    # Add term to result
-    fadd.s ft1, ft1, ft2
-
-    # Check convergence
-    fabs.s ft6, ft2
-    li t1, 0x33D6BF95        # 1e-7
-    fmv.w.x ft7, t1
-    flt.s t2, ft6, ft7
-
-    # i += 2
     addi t0, t0, 1
-    li t1, 15
-    bge t0, t1, cos_done
+    li t4, 20                # increase iterations for safety
+    bge t0, t4, cos_done
 
-    beq t2, zero, cos_loop
+    j cos_loop
 
 cos_done:
     fmv.s fa0, ft1
@@ -192,7 +187,11 @@ my_tanh:
     # If |x| >= 10, return sign(x) * 1.0
     li   t0, 1
     fcvt.s.w fa0, t0
-    flt.s t1, fs0, zero  # if x < 0
+
+    li   t0, 0
+    fcvt.s.w ft2, t0     # ft2 = 0.0
+
+    flt.s t1, fs0, ft2   # if x < 0
     beq  t1, zero, tanh_exit
     fneg.s fa0, fa0      # make it -1.0
     j    tanh_exit
