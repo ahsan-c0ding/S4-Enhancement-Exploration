@@ -1,5 +1,13 @@
+.global complex_mul
+.global hilbert_scan
+.global take_last_timestamp
+.global linear
+.global gelu
+.global softmax
+
 # Arguments: fa0=ar, fa1=ai, fa2=br, fa3=bi
-# Returns: fa0=out_r, fa1=out_i
+#            a0=out_r (pointer), a1=out_i (pointer)
+# Returns:   void (writes results to *out_r and *out_i)
 complex_mul:
     fmul.s ft0, fa0, fa2    # ar * br
     fmul.s ft1, fa1, fa3    # ai * bi
@@ -9,10 +17,9 @@ complex_mul:
     fmul.s ft3, fa1, fa2    # ai * br
     fadd.s ft5, ft2, ft3    # result_imag = ar*bi + ai*br
 
-    fmv.s  fa0, ft4
-    fmv.s  fa1, ft5
+    fsw    ft4, 0(a0)       # *out_r = result_real
+    fsw    ft5, 0(a1)       # *out_i = result_imag
     ret
-
 # Arguments: a0=input_ptr, a1=output_ptr, a2=indices_ptr
 # Constants: SEQ_LEN=4096, IN_CHANNELS=1
 hilbert_scan:
@@ -25,7 +32,7 @@ hilbert_loop:
     add  t3, a2, t2         # addr of indices[d]
     lw   t4, 0(t3)          # t4 = flat_idx
 
-    # Simple Safety Check: if (flat_idx < 0 || flat_idx >= 4096) flat_idx = 0
+    # Safety check: if (flat_idx < 0 || flat_idx >= 4096) flat_idx = 0
     blt  t4, zero, h_reset
     li   t5, 4096
     blt  t4, t5, h_access
@@ -33,15 +40,38 @@ h_reset:
     li   t4, 0
 
 h_access:
-    # input[flat_idx]
-    slli t5, t4, 2          # offset = flat_idx * 4
-    add  t6, a0, t5         # addr of input[flat_idx]
-    flw  ft0, 0(t6)         # Load pixel
+    # Channel loop over IN_CHANNELS
+    # IN_CHANNELS = 1, so t6 = 1 and this loop body executes exactly once (c=0 only, never loops back)
+    li   t5, 0              # c = 0
+    li   t6, 1              # IN_CHANNELS = 1
 
-    # output[d] = pixel
-    add  t6, a1, t2         # addr of output[d]
-    fsw  ft0, 0(t6)
+channel_loop:
+    bge  t5, t6, channel_done
 
+    # Load input[c][flat_idx]
+    # input is laid out as [IN_CHANNELS][SEQ_LEN] floats
+    # addr = a0 + (c * 4096 + flat_idx) * 4
+    li   t3, 4096
+    mul  t3, t5, t3         # c * SEQ_LEN
+    add  t3, t3, t4         # + flat_idx
+    slli t3, t3, 2          # * 4
+    add  t3, a0, t3
+    flw  ft0, 0(t3)
+
+    # Store output[d][c]
+    # output is laid out as [SEQ_LEN][IN_CHANNELS] floats
+    # addr = a1 + (d * IN_CHANNELS + c) * 4
+    # Since IN_CHANNELS = 1, this simplifies to a1 + (d + c) * 4
+    mul  t3, t0, t6         # d * IN_CHANNELS
+    add  t3, t3, t5         # + c
+    slli t3, t3, 2          # * 4
+    add  t3, a1, t3
+    fsw  ft0, 0(t3)
+
+    addi t5, t5, 1          # c++
+    j    channel_loop
+
+channel_done:
     addi t0, t0, 1          # d++
     blt  t0, t1, hilbert_loop
     ret
@@ -72,65 +102,86 @@ timestamp_loop:
 
 # Generic Linear Layer (Matrix-Matrix Multiplication + Bias)
 linear:
-    # We use t-registers (caller-saved) as we don't call other functions here.
-    # t0: i (outer loop counter - batch_size)
-    # t1: j (middle loop counter - out_features)
-    # t4: k (inner loop counter - in_features)
+    addi sp, sp, -32
+    sw   ra, 28(sp)
+    sw   s0, 24(sp)     # s0 = batch_size  (a4)
+    sw   s1, 20(sp)     # s1 = in_features (a5)
+    sw   s2, 16(sp)     # s2 = out_features (a6)
+    sw   s3, 12(sp)     # s3 = input ptr (a0)
+    sw   s4, 8(sp)      # s4 = output ptr (a1)
+    sw   s5, 4(sp)      # s5 = weight ptr (a2)
+    sw   s6, 0(sp)      # s6 = bias ptr (a3)
+
+    mv   s0, a4         # batch_size
+    mv   s1, a5         # in_features
+    mv   s2, a6         # out_features
+    mv   s3, a0         # input
+    mv   s4, a1         # output
+    mv   s5, a2         # weight
+    mv   s6, a3         # bias
 
     li t0, 0                    # i = 0
 outer_loop:
-    bge t0, a4, end_linear      # if i >= batch_size, exit
+    bge t0, s0, end_linear
 
     li t1, 0                    # j = 0
 middle_loop:
-    bge t1, a6, next_i          # if j >= out_features, next row
+    bge t1, s2, next_i
 
-    # float acc = bias[j]
-    slli t2, t1, 2              # j * 4 bytes
-    add  t3, a3, t2             # addr of bias[j]
-    flw  fa0, 0(t3)             # fa0 = acc
+    # acc = bias[j]
+    slli t2, t1, 2
+    add  t3, s6, t2
+    flw  fa0, 0(t3)
 
     li t4, 0                    # k = 0
 inner_loop:
-    bge t4, a5, store_result    # if k >= in_features, store the accumulation
+    bge t4, s1, store_result
 
-    # Load input[i * in_features + k]
-    mul  t2, t0, a5             # i * in_features
-    add  t2, t2, t4             # + k
-    slli t2, t2, 2              # * 4 (float size)
-    add  t3, a0, t2             # input address
-    flw  ft0, 0(t3)             # ft0 = input val
+    # input[i * in_features + k]
+    mul  t2, t0, s1
+    add  t2, t2, t4
+    slli t2, t2, 2
+    add  t3, s3, t2
+    flw  ft0, 0(t3)
 
-    # Load weight[j * in_features + k]
-    mul  t2, t1, a5             # j * in_features
-    add  t2, t2, t4             # + k
-    slli t2, t2, 2              # * 4
-    add  t3, a2, t2             # weight address
-    flw  ft1, 0(t3)             # ft1 = weight val
+    # weight[j * in_features + k]
+    mul  t2, t1, s1
+    add  t2, t2, t4
+    slli t2, t2, 2
+    add  t3, s5, t2
+    flw  ft1, 0(t3)
 
-    # acc += input * weight
     fmul.s ft2, ft0, ft1
     fadd.s fa0, fa0, ft2
 
-    addi t4, t4, 1              # k++
+    addi t4, t4, 1
     j inner_loop
 
 store_result:
-    # output[i * out_features + j] = acc
-    mul  t2, t0, a6             # i * out_features
-    add  t2, t2, t1             # + j
-    slli t2, t2, 2              # * 4
-    add  t3, a1, t2             # output address
+    # output[i * out_features + j]
+    mul  t2, t0, s2
+    add  t2, t2, t1
+    slli t2, t2, 2
+    add  t3, s4, t2
     fsw  fa0, 0(t3)
 
-    addi t1, t1, 1              # j++
+    addi t1, t1, 1
     j middle_loop
 
 next_i:
-    addi t0, t0, 1              # i++
+    addi t0, t0, 1
     j outer_loop
 
 end_linear:
+    lw   ra, 28(sp)
+    lw   s0, 24(sp)
+    lw   s1, 20(sp)
+    lw   s2, 16(sp)
+    lw   s3, 12(sp)
+    lw   s4, 8(sp)
+    lw   s5, 4(sp)
+    lw   s6, 0(sp)
+    addi sp, sp, 32
     ret
 
 .section .text
@@ -177,7 +228,13 @@ gelu_loop:
     # We must save ft registers if they were needed, but we re-load/compute
     call my_tanh
 
-    # 4. final = 0.5 * x * (1.0 + tanh_result)
+    # 4. Reload constants destroyed by the call
+    li   t1, 0x3F800000     # 1.0
+    fmv.w.x ft9, t1
+    li   t1, 0x3F000000     # 0.5
+    fmv.w.x ft8, t1
+
+    # 5. final = 0.5 * x * (1.0 + tanh_result)
     fadd.s ft1, fa0, ft9    # (1.0 + tanh)
     fmul.s ft1, ft1, fs0    # x * (1.0 + tanh)
     fmul.s ft1, ft1, ft8    # 0.5 * ...
@@ -205,6 +262,7 @@ softmax:
     sw   ra, 44(sp)
     sw   s0, 40(sp)         # s0 = pointer to logits
     sw   s1, 36(sp)         # s1 = number of classes
+    sw   s2, 24(sp)         # save s2 before use
     fsw  fs0, 32(sp)        # fs0 = max_val
     fsw  fs1, 28(sp)        # fs1 = sum of exps
 
@@ -228,7 +286,7 @@ not_new_max:
 
 end_max:
     # --- Pass 2: Exp(x - max) and Summing ---
-    fmv.s.x fs1, zero       # sum = 0.0
+    fmv.w.x fs1, zero       # sum = 0.0
     li   s2, 0              # i = 0 (using s2 because we call my_exp)
 exp_sum_loop:
     bge  s2, s1, end_exp_sum
@@ -266,7 +324,9 @@ softmax_done:
     lw   ra, 44(sp)
     lw   s0, 40(sp)
     lw   s1, 36(sp)
+    lw   s2, 24(sp)  # restore s2
     flw  fs0, 32(sp)
     flw  fs1, 28(sp)
     addi sp, sp, 48
     ret
+
