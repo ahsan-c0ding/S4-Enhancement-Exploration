@@ -10,13 +10,86 @@ extern void softmax(float* logits, int size);
 
 int main() {
 
-    // --- linear only, nothing else ---
+    // --- linear ---
     float lin_input[]  = {1.0f, 2.0f};
     float lin_weight[] = {1.0f, 0.0f, 0.0f, 1.0f};
     float lin_bias[]   = {0.0f, 1.0f};
     float lin_output[2];
 
-    // Step 1: batch_size=0, should exit immediately
-    //linear(lin_input, lin_output, lin_weight, lin_bias, 0, 2, 2);
-    return 103;
+    printf("Testing linear batch_size=0...\n");
+    linear(lin_input, lin_output, lin_weight, lin_bias, 0, 2, 2);
+    printf("  returned OK\n");
+
+    printf("Testing linear batch_size=1...\n");
+    linear(lin_input, lin_output, lin_weight, lin_bias, 1, 2, 2);
+    printf("  returned OK\n");
+    printf("  output[0] = %f (expected 1.0)\n", lin_output[0]);
+    printf("  output[1] = %f (expected 3.0)\n", lin_output[1]);
+
+    float lin_input2[]  = {1.0f, 2.0f, 3.0f};
+    float lin_weight2[] = {1.0f, 1.0f, 1.0f, 1.0f, 2.0f, 3.0f};
+    float lin_bias2[]   = {0.0f, 0.0f};
+    float lin_output2[2];
+
+    printf("Testing linear 1x3->1x2...\n");
+    linear(lin_input2, lin_output2, lin_weight2, lin_bias2, 1, 3, 2);
+    printf("  returned OK\n");
+    printf("  output[0] = %f (expected 6.0)\n", lin_output2[0]);
+    printf("  output[1] = %f (expected 14.0)\n", lin_output2[1]);
+
+    printf("All linear tests done.\n");
+
+       // --- gelu ---
+    printf("Testing gelu...\n");
+
+    float gelu_x[3] = {0.0f, 1.0f, -1.0f};
+    gelu(gelu_x, 3);
+    printf("  gelu(0)  = %f (expected 0.0)\n",    gelu_x[0]);
+    printf("  gelu(1)  = %f (expected 0.8413)\n", gelu_x[1]);
+    printf("  gelu(-1) = %f (expected -0.1587)\n", gelu_x[2]);
+
+    float gelu_y[1] = {5.0f};
+    gelu(gelu_y, 1);
+    printf("  gelu(5)  = %f (expected ~5.0)\n", gelu_y[0]);
+
+    float gelu_z[1] = {-5.0f};
+    gelu(gelu_z, 1);
+    printf("  gelu(-5) = %f (expected ~0.0)\n", gelu_z[0]);
+
+    printf("gelu done.\n\n");
+
+    // --- softmax ---
+    printf("Testing softmax...\n");
+
+    // All equal -> each should be 0.25
+    float sm1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    softmax(sm1, 4);
+    printf("  softmax([0,0,0,0]):\n");
+    printf("    [0] = %f (expected 0.25)\n", sm1[0]);
+    printf("    [1] = %f (expected 0.25)\n", sm1[1]);
+    printf("    [2] = %f (expected 0.25)\n", sm1[2]);
+    printf("    [3] = %f (expected 0.25)\n", sm1[3]);
+
+    // One dominant -> first near 1.0, rest near 0.0
+    float sm2[4] = {10.0f, 0.0f, 0.0f, 0.0f};
+    softmax(sm2, 4);
+    printf("  softmax([10,0,0,0]):\n");
+    printf("    [0] = %f (expected ~1.0)\n",  sm2[0]);
+    printf("    [1] = %f (expected ~0.0)\n",  sm2[1]);
+    printf("    [2] = %f (expected ~0.0)\n",  sm2[2]);
+    printf("    [3] = %f (expected ~0.0)\n",  sm2[3]);
+
+    // Ascending -> probabilities should be strictly increasing
+    float sm3[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    softmax(sm3, 4);
+    printf("  softmax([1,2,3,4]):\n");
+    printf("    [0] = %f (expected 0.0321)\n", sm3[0]);
+    printf("    [1] = %f (expected 0.0871)\n", sm3[1]);
+    printf("    [2] = %f (expected 0.2369)\n", sm3[2]);
+    printf("    [3] = %f (expected 0.6439)\n", sm3[3]);
+    float sum = sm3[0] + sm3[1] + sm3[2] + sm3[3];
+    printf("    sum  = %f (expected 1.0)\n",   sum);
+
+    printf("softmax done.\n");
+    return 0;
 }
