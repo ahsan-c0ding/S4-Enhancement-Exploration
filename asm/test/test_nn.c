@@ -7,6 +7,7 @@ extern void linear(const float* input, float* output, const float* weight, const
                    int batch_size, int in_features, int out_features);
 extern void gelu(float* x, int size);
 extern void softmax(float* logits, int size);
+extern void complex_exp(float a_real, float a_imag, float* out_real, float* out_imag);
 
 int main() {
 
@@ -91,5 +92,26 @@ int main() {
     printf("    sum  = %f (expected 1.0)\n",   sum);
 
     printf("softmax done.\n");
+    printf("Testing complex_exp...\n");
+
+float ce_r, ce_i;
+
+// exp(0 + 0i) = 1 + 0i
+complex_exp(0.0f, 0.0f, &ce_r, &ce_i);
+printf("  exp(0+0i) = %f + %fi (expected 1.0 + 0.0i)\n", ce_r, ce_i);
+
+// exp(0 + pi*i) = -1 + 0i  (Euler's formula)
+complex_exp(0.0f, 3.14159265f, &ce_r, &ce_i);
+printf("  exp(0+pi*i) = %f + %fi (expected -1.0 + 0.0i)\n", ce_r, ce_i);
+
+// exp(1 + 0i) = e + 0i
+complex_exp(1.0f, 0.0f, &ce_r, &ce_i);
+printf("  exp(1+0i) = %f + %fi (expected 2.7182 + 0.0i)\n", ce_r, ce_i);
+
+// exp(0 + pi/2 * i) = 0 + 1i
+complex_exp(0.0f, 1.5707963f, &ce_r, &ce_i);
+printf("  exp(0+pi/2*i) = %f + %fi (expected 0.0 + 1.0i)\n", ce_r, ce_i);
+
+printf("complex_exp done.\n\n");
     return 0;
 }

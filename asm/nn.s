@@ -330,3 +330,48 @@ softmax_done:
     addi sp, sp, 48
     ret
 
+.global complex_exp
+
+# Arguments: fa0=a_real, fa1=a_imag
+#            a0=out_real (pointer), a1=out_imag (pointer)
+# Returns:   void (writes results to *out_real and *out_imag)
+complex_exp:
+    # --- Stack Setup ---
+    addi sp, sp, -32
+    sw   ra,  28(sp)
+    sw   s0,  24(sp)        # s0 = out_real pointer
+    sw   s1,  20(sp)        # s1 = out_imag pointer
+    fsw  fs0, 16(sp)        # fs0 = a_imag (survives calls)
+    fsw  fs1, 12(sp)        # fs1 = exp_a  (survives calls)
+
+    # Save arguments that will be clobbered by calls
+    fmv.s fs0, fa1          # fs0 = a_imag
+    mv    s0,  a0           # s0  = out_real pointer
+    mv    s1,  a1           # s1  = out_imag pointer
+
+    # Step 1: exp_a = my_exp(a_real)
+    # fa0 already = a_real, ready to call
+    call  my_exp            # fa0 = exp(a_real)
+    fmv.s fs1, fa0          # fs1 = exp_a (save before next call)
+
+    # Step 2: out_real = exp_a * my_cos(a_imag)
+    fmv.s fa0, fs0          # fa0 = a_imag (argument for cos)
+    call  my_cos            # fa0 = cos(a_imag)
+    fmul.s ft0, fs1, fa0    # ft0 = exp_a * cos(a_imag)
+    fsw   ft0, 0(s0)        # *out_real = result
+
+    # Step 3: out_imag = exp_a * my_sin(a_imag)
+    fmv.s fa0, fs0          # fa0 = a_imag (argument for sin)
+    call  my_sin            # fa0 = sin(a_imag)
+    fmul.s ft0, fs1, fa0    # ft0 = exp_a * sin(a_imag)
+    fsw   ft0, 0(s1)        # *out_imag = result
+
+    # --- Stack Teardown ---
+    lw   ra,  28(sp)
+    lw   s0,  24(sp)
+    lw   s1,  20(sp)
+    flw  fs0, 16(sp)
+    flw  fs1, 12(sp)
+    addi sp, sp, 32
+    ret
+
