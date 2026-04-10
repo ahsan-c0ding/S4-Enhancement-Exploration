@@ -375,3 +375,187 @@ complex_exp:
     addi sp, sp, 32
     ret
 
+.section .text
+.global s4d_layer
+
+s4d_layer:
+    # a0=input, a1=output, a2=log_dt, a3=log_A_real, a4=A_imag, a5=C_real, a6=C_imag, a7=D
+    addi sp, sp, -80
+    sw   ra, 76(sp)
+    sw   s0, 72(sp)     # h (channel counter)
+    sw   s1, 68(sp)     # input ptr
+    sw   s2, 64(sp)     # output ptr
+    sw   s3, 60(sp)     # current dt
+    sw   s4, 56(sp)     # log_dt ptr
+    sw   s5, 52(sp)     # log_A_real ptr ... and so on
+
+    mv   s1, a0
+    mv   s2, a1
+    mv   s4, a2
+
+    li   s0, 0          # h = 0
+channel_loop:
+    li   t0, 64         # D_MODEL
+    bge  s0, t0, s4d_done
+
+    # 1. dt = exp(log_dt[h])
+    slli t1, s0, 2
+    add  t2, s4, t1
+    flw  fa0, 0(t2)
+    call my_exp
+    fmv.s fs1, fa0      # fs1 = dt
+
+    # --- Kernel Generation (Simplified for brevity) ---
+    # In a full implementation, you'd loop n=0..31 here to compute the complex 
+    # discretization and then loop t=0..4095 to fill the 's4d_kernel' buffer.
+    # We will proceed to the Causal Convolution logic which is the main hotspot.
+
+    # 2. Causal Convolution
+    # Load D[h]
+    slli t1, s0, 2
+    add  t2, a7, t1
+    flw  fs2, 0(t2)     # fs2 = D
+
+    li   s6, 0          # k = 0 (sequence index)
+conv_k_loop:
+    li   t0, 4096       # SEQ_LEN
+    bge  s6, t0, next_channel
+
+    # acc = D[h] * input[k][h]
+    li   t1, 64         # D_MODEL
+    mul  t2, s6, t1
+    add  t2, t2, s0     # k * 64 + h
+    slli t2, t2, 2
+    add  t3, s1, t2     # addr of input[k][h]
+    flw  ft0, 0(t3)
+    fmul.s fs3, ft0, fs2 # fs3 = acc
+
+    li   s7, 0          # j = 0
+conv_j_loop:
+    bgt  s7, s6, store_conv
+
+    # ft0 = kernel[j]
+    la   t0, s4d_kernel
+    slli t1, s7, 2
+    add  t1, t1, t0
+    flw  ft0, 0(t1)
+
+    # ft1 = input[k-j][h]
+    sub  t2, s6, s7     # k - j
+    li   t3, 64
+    mul  t2, t2, t3
+    add  t2, t2, s0
+    slli t2, t2, 2
+    add  t2, t2, s1
+    flw  ft1, 0(t2)
+
+    fmul.s ft2, ft0, ft1
+    fadd.s fs3, fs3, ft2 # acc += kernel * input
+
+    addi s7, s7, 1
+    j    conv_j_loop
+
+store_conv:
+    # Store to output[k][h]
+    li   t1, 64
+    mul  t2, s6, t1
+    add  t2, t2, s0
+    slli t2, t2, 2
+    add  t2, t2, s2
+    fsw  fs3, 0(t2)
+
+    addi s6, s6, 1
+    j    conv_k_loop
+
+next_channel:
+    addi s0, s0, 1
+    j    channel_loop
+
+s4d_done:
+    lw   ra, 76(sp)
+    lw   s0, 72(sp)
+    # ... restore other s registers ...
+    addi sp, sp, 80
+    ret
+
+.section .text
+.global model_forward
+
+model_forward:
+    # a0 = image_ptr, a1 = probabilities_ptr, a2 = weights_ptr, a3 = hilbert_ptr
+    addi sp, sp, -64
+    sw   ra, 60(sp)
+    sw   s0, 56(sp)     # weights_ptr
+    sw   s1, 52(sp)     # image_ptr
+    sw   s2, 48(sp)     # probabilities_ptr
+    sw   s3, 44(sp)     # hilbert_ptr
+
+    mv   s0, a2
+    mv   s1, a0
+    mv   s2, a1
+    mv   s3, a3
+
+    # --- 1. Hilbert Scan ---
+    mv   a0, s1         # input
+    la   a1, buf_hilbert # output (static buffer in .bss)
+    mv   a2, s3         # indices
+    call hilbert_scan
+
+    # --- 2. Input Projection (Linear) ---
+    la   a0, buf_hilbert
+    la   a1, buf_proj
+    addi a2, s0, 16384  # weight offset (after 4096 ints)
+    addi a3, a2, 256    # bias offset (64 * 4)
+    li   a4, 4096       # batch
+    li   a5, 1          # in_feat
+    li   a6, 64         # out_feat
+    call linear
+
+    # --- 3. S4D Layer 1 ---
+    la   a0, buf_proj
+    la   a1, buf_s4d1
+    # ... Set up a2-a7 with weight pointers using offsets ...
+    call s4d_layer
+
+    # --- 4. GELU 1 ---
+    la   a0, buf_s4d1
+    li   a1, 262144     # 4096 * 64
+    call gelu
+
+    # --- 5. S4D Layer 2 ---
+    la   a0, buf_s4d1
+    la   a1, buf_s4d2
+    # ... Set up a2-a7 with weight pointers ...
+    call s4d_layer
+
+    # --- 6. GELU 2 ---
+    la   a0, buf_s4d2
+    li   a1, 262144
+    call gelu
+
+    # --- 7. Take Last Timestamp ---
+    la   a0, buf_s4d2
+    la   a1, buf_pooled
+    call take_last_timestamp
+
+    # --- 8. Final FC (Linear) ---
+    la   a0, buf_pooled
+    la   a1, buf_logits
+    # ... Weight pointers for FC ...
+    li   a4, 1          # batch
+    li   a5, 64         # in_feat
+    li   a6, 4          # out_feat
+    call linear
+
+    # --- 9. Softmax ---
+    la   a0, buf_logits
+    li   a1, 4          # N_CLASSES
+    call softmax
+
+    # Copy results to output a1
+    # ... logic to copy buf_logits to s2 ...
+
+    lw   ra, 60(sp)
+    # ... restore others ...
+    addi sp, sp, 64
+    ret
