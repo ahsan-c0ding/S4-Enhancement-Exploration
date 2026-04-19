@@ -7,7 +7,7 @@ This repository contains the complete, validated RISC-V 32-bit assembly implemen
 * `/test_data/` - Contains the binary PyTorch reference data used for end-to-end validation testing across 10 samples.
 * `Makefile` - The build system required to compile the assembly files.
 
-## Deployment and Evaluation Guide (For Grading)
+## Deployment and Evaluation Guide 
 
 The files in this repository are packaged for deployment into a standard `riscv-env-setup` workspace. Please follow these instructions carefully to replicate the validation results.
 
