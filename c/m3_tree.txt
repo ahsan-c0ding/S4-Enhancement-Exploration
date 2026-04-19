@@ -1,0 +1,202 @@
+/home/abdul_rahim/CAAL_M3_WORKSPACE
+├── CAAL-S4-Galaxy
+│   ├── Hilbertplot.py
+│   ├── README.md
+│   ├── asm
+│   │   ├── README.md
+│   │   ├── main.s
+│   │   ├── math.s
+│   │   ├── nn.s
+│   │   └── test
+│   │       ├── test_math.c
+│   │       └── test_nn.c
+│   ├── c
+│   │   ├── Makefile
+│   │   ├── README.md
+│   │   ├── galaxy_app
+│   │   ├── m3_tree.txt
+│   │   ├── main.c
+│   │   ├── math.c
+│   │   ├── math.h
+│   │   ├── nn.c
+│   │   ├── nn.h
+│   │   ├── nn_00.s
+│   │   ├── nn_02.s
+│   │   ├── test.c
+│   │   └── test_app
+│   ├── convert_data.py
+│   ├── export
+│   │   ├── charts
+│   │   │   ├── c_vs_python.png
+│   │   │   ├── error_distribution.png
+│   │   │   ├── instruction_count.png
+│   │   │   ├── memory_footprint.png
+│   │   │   ├── optimization_timing.png
+│   │   │   └── per_layer_breakdown.png
+│   │   ├── generate_10_samples.py
+│   │   ├── generate_diverse_samples.py
+│   │   ├── generate_organic_samples.py
+│   │   ├── generate_test_data.py
+│   │   ├── plot_benchmarks.py
+│   │   ├── plot_errors.py
+│   │   ├── plot_instructions.py
+│   │   └── run_test.py
+│   ├── images
+│   │   ├── Hilbert8x8.png
+│   │   ├── confusion matrix.PNG
+│   │   └── training loss, and validation accuracy.PNG
+│   ├── main.py
+│   ├── model
+│   │   ├── __init__.py
+│   │   ├── functions.py
+│   │   ├── gclassifier.py
+│   │   ├── gui.py
+│   │   ├── hilbert.py
+│   │   ├── interface.py
+│   │   ├── s4_conv.py
+│   │   ├── s4_recurrent.py
+│   │   ├── s4d.py
+│   │   ├── s4d_modified.py
+│   │   ├── tlts.py
+│   │   └── verify_my_task.py
+│   ├── model_params
+│   │   ├── galaxys4-30609.pth
+│   │   ├── galaxys4-30EPOCH-STANDARD.pth
+│   │   ├── model_weights.bin
+│   │   ├── weights.bin
+│   │   └── weights.txt
+│   ├── requirements.txt
+│   ├── scripts
+│   │   ├── train.ipynb
+│   │   └── train.py
+│   ├── test_data
+│   │   ├── input_image.bin
+│   │   ├── out_01_hilbert.bin
+│   │   ├── out_02_uproject.bin
+│   │   ├── out_03_s4_1.bin
+│   │   ├── out_04_gelu_1.bin
+│   │   ├── out_05_s4_2.bin
+│   │   ├── out_06_gelu_2.bin
+│   │   ├── out_07_takelast.bin
+│   │   ├── out_08_fc.bin
+│   │   ├── out_09_softmax.bin
+│   │   ├── s4_1_A_imag.bin
+│   │   ├── s4_1_C.bin
+│   │   ├── s4_1_D.bin
+│   │   ├── s4_1_log_A_real.bin
+│   │   ├── s4_1_log_dt.bin
+│   │   ├── sample_0_fc.bin
+│   │   ├── sample_0_gelu_1.bin
+│   │   ├── sample_0_gelu_2.bin
+│   │   ├── sample_0_hilbert.bin
+│   │   ├── sample_0_img.bin
+│   │   ├── sample_0_ref.bin
+│   │   ├── sample_0_s4_1.bin
+│   │   ├── sample_0_s4_2.bin
+│   │   ├── sample_0_softmax.bin
+│   │   ├── sample_0_takelast.bin
+│   │   ├── sample_0_uproject.bin
+│   │   ├── sample_1_fc.bin
+│   │   ├── sample_1_gelu_1.bin
+│   │   ├── sample_1_gelu_2.bin
+│   │   ├── sample_1_hilbert.bin
+│   │   ├── sample_1_img.bin
+│   │   ├── sample_1_ref.bin
+│   │   ├── sample_1_s4_1.bin
+│   │   ├── sample_1_s4_2.bin
+│   │   ├── sample_1_softmax.bin
+│   │   ├── sample_1_takelast.bin
+│   │   ├── sample_1_uproject.bin
+│   │   ├── sample_2_fc.bin
+│   │   ├── sample_2_gelu_1.bin
+│   │   ├── sample_2_gelu_2.bin
+│   │   ├── sample_2_hilbert.bin
+│   │   ├── sample_2_img.bin
+│   │   ├── sample_2_ref.bin
+│   │   ├── sample_2_s4_1.bin
+│   │   ├── sample_2_s4_2.bin
+│   │   ├── sample_2_softmax.bin
+│   │   ├── sample_2_takelast.bin
+│   │   ├── sample_2_uproject.bin
+│   │   ├── sample_3_fc.bin
+│   │   ├── sample_3_gelu_1.bin
+│   │   ├── sample_3_gelu_2.bin
+│   │   ├── sample_3_hilbert.bin
+│   │   ├── sample_3_img.bin
+│   │   ├── sample_3_ref.bin
+│   │   ├── sample_3_s4_1.bin
+│   │   ├── sample_3_s4_2.bin
+│   │   ├── sample_3_softmax.bin
+│   │   ├── sample_3_takelast.bin
+│   │   ├── sample_3_uproject.bin
+│   │   ├── sample_4_fc.bin
+│   │   ├── sample_4_gelu_1.bin
+│   │   ├── sample_4_gelu_2.bin
+│   │   ├── sample_4_hilbert.bin
+│   │   ├── sample_4_img.bin
+│   │   ├── sample_4_ref.bin
+│   │   ├── sample_4_s4_1.bin
+│   │   ├── sample_4_s4_2.bin
+│   │   ├── sample_4_softmax.bin
+│   │   ├── sample_4_takelast.bin
+│   │   ├── sample_4_uproject.bin
+│   │   ├── sample_5_fc.bin
+│   │   ├── sample_5_gelu_1.bin
+│   │   ├── sample_5_gelu_2.bin
+│   │   ├── sample_5_hilbert.bin
+│   │   ├── sample_5_img.bin
+│   │   ├── sample_5_s4_1.bin
+│   │   ├── sample_5_s4_2.bin
+│   │   ├── sample_5_softmax.bin
+│   │   ├── sample_5_takelast.bin
+│   │   ├── sample_5_uproject.bin
+│   │   ├── sample_6_fc.bin
+│   │   ├── sample_6_gelu_1.bin
+│   │   ├── sample_6_gelu_2.bin
+│   │   ├── sample_6_hilbert.bin
+│   │   ├── sample_6_img.bin
+│   │   ├── sample_6_s4_1.bin
+│   │   ├── sample_6_s4_2.bin
+│   │   ├── sample_6_softmax.bin
+│   │   ├── sample_6_takelast.bin
+│   │   ├── sample_6_uproject.bin
+│   │   ├── sample_7_fc.bin
+│   │   ├── sample_7_gelu_1.bin
+│   │   ├── sample_7_gelu_2.bin
+│   │   ├── sample_7_hilbert.bin
+│   │   ├── sample_7_img.bin
+│   │   ├── sample_7_s4_1.bin
+│   │   ├── sample_7_s4_2.bin
+│   │   ├── sample_7_softmax.bin
+│   │   ├── sample_7_takelast.bin
+│   │   ├── sample_7_uproject.bin
+│   │   ├── sample_8_fc.bin
+│   │   ├── sample_8_gelu_1.bin
+│   │   ├── sample_8_gelu_2.bin
+│   │   ├── sample_8_hilbert.bin
+│   │   ├── sample_8_img.bin
+│   │   ├── sample_8_s4_1.bin
+│   │   ├── sample_8_s4_2.bin
+│   │   ├── sample_8_softmax.bin
+│   │   ├── sample_8_takelast.bin
+│   │   ├── sample_8_uproject.bin
+│   │   ├── sample_9_fc.bin
+│   │   ├── sample_9_gelu_1.bin
+│   │   ├── sample_9_gelu_2.bin
+│   │   ├── sample_9_hilbert.bin
+│   │   ├── sample_9_img.bin
+│   │   ├── sample_9_s4_1.bin
+│   │   ├── sample_9_s4_2.bin
+│   │   ├── sample_9_softmax.bin
+│   │   ├── sample_9_takelast.bin
+│   │   ├── sample_9_uproject.bin
+│   │   ├── uproject_b.bin
+│   │   └── uproject_w.bin
+│   ├── tests
+│   │   ├── test_forward.py
+│   │   ├── test_s4_equivalence.py
+│   │   └── test_s4d_fft_conv.py
+│   └── utils.py
+└── test_data
+
+14 directories, 186 files

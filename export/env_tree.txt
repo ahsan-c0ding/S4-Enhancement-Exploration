@@ -1,0 +1,81 @@
+/home/abdul_rahim/riscv-env-setup
+├── README.md
+├── build.sh
+├── code_structure.md
+├── count_vec.sh
+├── data.s
+├── data_0.s
+├── data_1.s
+├── data_2.s
+├── data_3.s
+├── data_4.s
+├── data_5.s
+├── data_6.s
+├── data_7.s
+├── data_8.s
+├── data_9.s
+├── diagnostic_0.s
+├── diagnostic_output.txt
+├── docker.md
+├── final_validation_report.txt
+├── galaxy.s
+├── galaxy_0.s
+├── galaxy_1.s
+├── galaxy_2.s
+├── galaxy_3.s
+├── galaxy_4.s
+├── galaxy_5.s
+├── galaxy_6.s
+├── galaxy_7.s
+├── galaxy_8.s
+├── galaxy_9.s
+├── main.s
+├── main.s:Zone.Identifier
+├── main_qemu.s
+├── math.s
+├── math.s.txt:Zone.Identifier
+├── math.s:Zone.Identifier
+├── math_old.s
+├── math_qemu.s
+├── mf.s
+├── my_tree.txt
+├── nn - Copy.s:Zone.Identifier
+├── nn(1).s.s:Zone.Identifier
+├── nn(2).s
+├── nn(2).s:Zone.Identifier
+├── nn.s
+├── nn.s.s:Zone.Identifier
+├── nn.s:Zone.Identifier
+├── nn_ this works.s
+├── nn_debug.s
+├── nn_old.s
+├── nn_qemu.s
+├── nnt this works 2.s
+├── parallel_report.txt
+├── parse_veer_profile.py
+├── qemu_compile.s
+├── run_full_validation.py
+├── run_qemu_extract.py
+├── run_task2.py
+├── run_task2_full.py
+├── run_task2_parallel.py
+├── run_task2_qemu_final.py
+├── run_task2_sequential - Copy.py
+├── run_task2_sequential - Copy.py:Zone.Identifier
+├── run_task2_sequential.py
+├── run_task3_dynamic.py
+├── run_task3_static.py
+├── sample.s
+├── setup_docker_env.sh
+├── task2_latex_report.txt
+├── task3_analysis_log.txt
+├── task3_dynamic.py
+├── task3_dynamic_final.py
+├── task3_dynamic_single.py
+├── task3_static.py
+├── test_print.s
+└── veer
+    ├── link.ld
+    └── whisper.json
+
+2 directories, 77 files
