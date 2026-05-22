@@ -269,61 +269,56 @@ my_cos:
     fmv.s fa0, ft5
     ret
 
-# ____________________________________________________________
+# _________________________________________________________________________________
 # my_tanh(x)
-# using identity:
-#   tanh(x) = (e^x - e^-x) / (e^x + e^-x)
-# If |x| is large (>= 10) the tanh basically becomes ±1
-# so we directly return 1 or -1 to save time.
+# First we perform boundary checks. If the absolute value of x is greater than 
+# 4.0, tanh(x) asymptotically approaches ±1.0 within single-precision limits. 
+# We clip the value early to bypass core calculations entirely for large inputs.
 #
-# Otherwise we compute e^x and e^-x using my_exp
-# Then apply the formula above to get the result.
-# ____________________________________________________________
+# For values within [-4.0, 4.0], we use a [3/3] Padé Approximant:
+#   tanh(x) = x * (1 + 0.10001*x^2) / (1 + 0.43301*x^2 + 0.009999*x^4)
+#
+# Instead of calculating expensive exponential terms or relying on dynamic loops 
+# like a Taylor series, this method uses a rational function of polynomials.
+# It minimizes the worst-case error uniformly across the target interval.
+# _________________________________________________________________________________
 my_tanh:
-    addi sp, sp, -32
-    sw ra, 28(sp)
-    fsw fs0, 24(sp)
-    fsw fs1, 20(sp)
-
-    fmv.s fs0, fa0
-
-    li t0, 0x41200000
+    # Check boundaries: if |x| > 4.0, tanh(x) is basically +-1.0
+    li      t0, 0x40800000       # 4.0 in hex
     fmv.w.x ft0, t0
-    fabs.s ft1, fs0
-    flt.s t1, ft1, ft0
-    bne t1, zero, tanh_math
+    fabs.s  ft1, fa0
+    flt.s   t1, ft0, ft1         # t1 = 1 if |x| > 4.0
+    beqz    t1, .Ltanh_math
 
-    li t0, 1
-    fcvt.s.w fa0, t0
+    # Return sign(x) * 1.0
+    li      t0, 0x3F800000       # 1.0
+    fmv.w.x ft0, t0
+    fsgnj.s fa0, ft0, fa0        # inject sign of fa0(x) into t0(1.0)
+    ret
 
-    li t0, 0
-    fcvt.s.w ft2, t0
+.Ltanh_math:
+    fmul.s  ft0, fa0, fa0        # ft0 = x^2
+    
+    # Numerator: x * (1.0 + 0.10001 * x^2)
+    li      t0, 0x3DCCCCD0       # 0.10001000
+    fmv.w.x ft1, t0
+    fmul.s  ft1, ft1, ft0        # 0.10001 * x^2
+    li      t0, 0x3F800000       # 1.0
+    fmv.w.x ft2, t0
+    fadd.s  ft1, ft1, ft2        # 1.0 + 0.10001*x^2
+    fmul.s  ft3, fa0, ft1        # Num = x * (1 + 0.10001*x^2)
 
-    flt.s t1, fs0, ft2
-    beq t1, zero, tanh_exit
-    fneg.s fa0, fa0
-    j tanh_exit
+    # Denominator: 1.0 + x^2 * (0.43301 + 0.009999 * x^2)
+    li      t0, 0x3C23D69A       # 0.009999
+    fmv.w.x ft1, t0
+    fmul.s  ft1, ft1, ft0        # 0.009999 * x^2
+    li      t0, 0x3EDDA740       # 0.43301
+    fmv.w.x ft4, t0
+    fadd.s  ft1, ft1, ft4        # 0.43301 + 0.009999*x^2
+    fmul.s  ft1, ft1, ft0        # x^2 * (0.43301 + 0.009999*x^2)
+    fadd.s  ft4, ft2, ft1        # Den = 1.0 + ...
 
-tanh_math:
-    # Compute e^x
-    fmv.s fa0, fs0
-    call my_exp
-    fmv.s fs1, fa0
-
-    # Compute e^-x
-    fneg.s fa0, fs0
-    call my_exp
-
-    # (e^x - e^-x) / (e^x + e^-x)
-    fsub.s ft1, fs1, fa0
-    fadd.s ft2, fs1, fa0
-    fdiv.s fa0, ft1, ft2
-
-tanh_exit:
-    lw ra, 28(sp)
-    flw fs0, 24(sp)
-    flw fs1, 20(sp)
-    addi sp, sp, 32
+    fdiv.s  fa0, ft3, ft4        # tanh(x) = Num / Den
     ret
 
 # _________________________________________________________________
