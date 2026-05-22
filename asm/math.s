@@ -1,4 +1,4 @@
-# Math.c implementation in RISC-V assembly
+# Optimized Math.s for M4
 
 .global my_exp
 .global my_sin
@@ -326,54 +326,14 @@ tanh_exit:
     addi sp, sp, 32
     ret
 
-# ____________________________________________________________
-# my_sqrt(x) uses Newton’s method:
-#   guess = (guess + x/guess) / 2
-# If x = 0 then return 0.
-#
-# Initial guess if x >= 1 then start with x otherwise if x < 1 
-# then start with 1
-# Keep updating guess until difference becomes very small (1e-7).
-# _____________________________________________________________-
+# _________________________________________________________________
+# my_sqrt(x)
+# Uses built-in optimized sqrt in RVV, replaces our Newton loop implementation.
+# _________________________________________________________________
 my_sqrt:
-    li t0, 0
-    fcvt.s.w ft0, t0
-    feq.s t1, fa0, ft0
-    bne t1, zero, sqrt_zero
-
-    fmv.s ft0, fa0
-
-    li t0, 1
-    fcvt.s.w ft1, t0
-    flt.s t1, fa0, ft1
-    beq t1, zero, sqrt_loop
-    fmv.s ft0, ft1
-
-sqrt_loop:
-    # Newton iteration: guess = (guess + x/guess) / 2
-    fdiv.s ft2, fa0, ft0
-    fadd.s ft2, ft0, ft2
-    li t0, 2
-    fcvt.s.w ft3, t0
-    fdiv.s ft2, ft2, ft3
-
-    fsub.s ft3, ft2, ft0
-    fabs.s ft3, ft3
-    li t0, 0x33D6BF95
-    fmv.w.x ft4, t0
-    flt.s t1, ft3, ft4
-
-    fmv.s ft0, ft2
-
-    beq t1, zero, sqrt_loop
-
-sqrt_done:
-    fmv.s fa0, ft0
+    fsqrt.s fa0, fa0
     ret
 
-sqrt_zero:
-    fmv.s fa0, ft0
-    ret
 
 # ___________________________________________________________
 # my_pow(x, y) uses:
