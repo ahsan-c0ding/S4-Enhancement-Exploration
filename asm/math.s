@@ -8,78 +8,81 @@
 .global my_pow
 .global my_log
 
-# ____________________________________________________________
+# _____________________________________________________________________________
 # my_exp(x)
-# This function computes e^x using the Taylor series:
-#       e^x = 1 + x + x^2/2! + x^3/3! + ...
-# Approach:
-#   If x is negative, we avoid by directly computing the series
-#   as it converges slower for neg values.
-#   Instead we use:
-#       e^x = 1 / e^(-x)
-#   Now we recursively compute e^(-x) and take reciprocal of it.
-#   For positive x:
-#   We iteratively build each term using the relation:
-#       term = term * x / i
-#   By doing this we are able to avoid recomputation of power 
-#   and factorials from scratch.
-#   We keep adding terms to the result until the term becomes
-#   very small (|term| < 1e-7), or we hit a safe iteration cap
-# ________________________________________________________________
-
+# First we apply bounds checking. If x is less than -88.0, the result underflows 
+# single-precision float limits and returns 0.0. If x exceeds 88.0, it overflows 
+# to positive infinity (+inf). 
+#
+# For valid inputs, we perform a range reduction to decompose x into:
+#   x = n * ln(2) + r, where n is an integer and |r| <= ln(2)/2 = 0.34657
+#
+# This allows us to compute the exponential function using power-of-two scaling:
+#   e^x = e^(n*ln(2) + r) = (e^ln(2))^n * e^r = 2^n * e^r
+#
+# Horner's polynomial P(r) = 1 + r + 0.5r^2 + 0.166667r^3 + 0.0416667r^4
+#
+# We approximate the remainder e^r on the tiny interval [-0.34657, 0.34657] using 
+# a 4th-degree Horner polynomial, P(r). Then, we reconstruct 2^n instantly by shifting 
+# the integer n directly into the exponent bitfield, avoiding adding a loop.
+# _____________________________________________________________________________
 my_exp:
-    addi sp, sp, -16
-    sw ra, 12(sp)
-    fsw fs0, 8(sp)
-
-    fmv.s fs0, fa0
-    li t0, 0
-    fcvt.s.w ft1, t0
-
-    flt.s t1, fs0, ft1
-    beq  t1, zero, exp_positive
-    # Handle negative: compute 1 / exp(-x)
-    fneg.s fa0, fs0
-    call my_exp
-
-    li t0, 1
-    fcvt.s.w ft1, t0
-    fdiv.s fa0, ft1, fa0
-    j exp_exit
-
-exp_positive:
-    li t0, 1
-    fcvt.s.w ft1, t0
-    fmv.s ft2, ft1
-    li t0, 1
-
-exp_loop:
-    # term = term * x / i
-    fmul.s ft2, ft2, fs0
-    fcvt.s.w ft4, t0
-    fdiv.s ft2, ft2, ft4
-
-    fadd.s ft1, ft1, ft2
-
-    # Convergence check |term| < 1e-7
-    li t1, 0x33D6BF95
-    fmv.w.x ft5, t1
-    fabs.s ft6, ft2
-    flt.s t2, ft6, ft5
-
-    addi t0, t0, 1
-    li t3, 50
-    bge t0, t3, exp_done
-    beq t2, zero, exp_loop
-
-exp_done:
-    fmv.s fa0, ft1
-
-exp_exit:
-    flw fs0, 8(sp)
-    lw ra, 12(sp)
-    addi sp, sp, 16
+    # Bounds checking
+    li      t0, 0xC2B00000       # -88.0
+    fmv.w.x ft0, t0
+    flt.s   t1, fa0, ft0
+    beqz    t1, .Lexp_check_pos
+    fmv.w.x fa0, zero            # return 0.0 if x < -88
     ret
+.Lexp_check_pos:
+    li      t0, 0x42B00000       # 88.0
+    fmv.w.x ft0, t0
+    flt.s   t1, ft0, fa0
+    beqz    t1, .Lexp_math
+    li      t0, 0x7F800000       # +inf
+    fmv.w.x fa0, t0              # return +inf if x > 88
+    ret
+
+.Lexp_math:
+    # n = round(x / ln2)
+    li      t0, 0x3FB8AA3B       # 1.442695 (1/ln2)
+    fmv.w.x ft0, t0
+    fmul.s  ft1, fa0, ft0
+    fcvt.w.s a0, ft1, rne        # Integer n
+    fcvt.s.w ft2, a0             # Float n
+
+    # r = x - n * ln2
+    li      t0, 0x3F317218       # 0.693147 (ln2)
+    fmv.w.x ft3, t0
+    fmul.s  ft3, ft2, ft3        # n * ln2
+    fsub.s  ft4, fa0, ft3        # r
+
+    # P(r) = 1 + r(1 + r(0.5 + r(0.166667 + r*0.0416667)))
+    li      t0, 0x3D2AAAAB       # 0.0416667
+    fmv.w.x ft5, t0
+    fmul.s  ft5, ft5, ft4        # r * 0.0416667
+    li      t0, 0x3E2AAAAB       # 0.166667
+    fmv.w.x ft6, t0
+    fadd.s  ft5, ft5, ft6        # 0.166667 + r*0.0416667
+    fmul.s  ft5, ft5, ft4        # r * (...)
+    li      t0, 0x3F000000       # 0.5
+    fmv.w.x ft6, t0
+    fadd.s  ft5, ft5, ft6        # 0.5 + ...
+    fmul.s  ft5, ft5, ft4        # r * (...)
+    li      t0, 0x3F800000       # 1.0
+    fmv.w.x ft6, t0
+    fadd.s  ft5, ft5, ft6        # 1.0 + ...
+    fmul.s  ft5, ft5, ft4        # r * (...)
+    fadd.s  ft5, ft5, ft6        # P(r) = 1.0 + ...
+
+    # 2^n using exponent injection
+    addi    a0, a0, 127          # bias exponent
+    slli    a0, a0, 23           # shift to exponent field
+    fmv.w.x ft6, a0              # ft6 = 2^n exactly
+
+    fmul.s  fa0, ft5, ft6        # result = P(r) * 2^n
+    ret
+
 
 # _____________________________________________________________________________
 # my_sin(x)
