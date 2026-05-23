@@ -436,3 +436,55 @@ log_exit:
     lw s0, 16(sp)
     addi sp, sp, 32
     ret
+
+# =================================================================
+#  M4 VECTOR BLOCKS
+#  Don't touch these yet. We'll use them later when we refactor 
+#  nn.s to pass array pointers directly instead of looping floats.
+# =================================================================
+.global v_my_tanh
+
+# v_my_tanh
+# a0 = input array pointer (*x)
+# a1 = output array pointer (*y)
+# a2 = number of elements (N)
+v_my_tanh:
+.L_v_tanh_loop:
+    vsetvli t0, a2, e32, m8, ta, ma    # Configure vector lengths for 32-bit floats
+    vle32.v v8, (a0)                   # Load vector of x
+
+    # Calculate x^2
+    vfmul.vv v16, v8, v8
+
+    # Numerator: x * (1.0 + 0.10001*x^2)
+    li      t1, 0x3DCCCCD0             # 0.10001
+    fmv.w.x ft0, t1
+    vfmv.v.f v24, ft0
+    vfmacc.vv v24, v16, v24            # v24 = 0.10001 * x^2
+    li      t1, 0x3F800000             # 1.0
+    fmv.w.x ft1, t1
+    vfadd.vf v24, v24, ft1             # v24 = 1.0 + 0.10001*x^2
+    vfmul.vv v24, v8, v24              # Numerator complete
+
+    # Denominator: 1.0 + x^2 * (0.43301 + 0.009999*x^2)
+    li      t1, 0x3C23D69A             # 0.009999
+    fmv.w.x ft2, t1
+    vfmv.v.f v0, ft2
+    vfmul.vv v0, v16, v0               # 0.009999 * x^2
+    li      t1, 0x3EDDA740             # 0.43301
+    fmv.w.x ft3, t1
+    vfadd.vf v0, v0, ft3               # + 0.43301
+    vfmul.vv v0, v16, v0               # x^2 * (...)
+    vfadd.vf v0, v0, ft1               # Denominator complete
+
+    # Divide and store
+    vfdiv.vv v8, v24, v0               # v8 = Num / Den
+    vse32.v v8, (a1)                   # Store result
+
+    # Bump pointers
+    slli    t1, t0, 2                  # t1 = elements processed * 4 bytes
+    add     a0, a0, t1                 # advance input pointer
+    add     a1, a1, t1                 # advance output pointer
+    sub     a2, a2, t0                 # subtract elements processed
+    bnez    a2, .L_v_tanh_loop         # loop if N > 0
+    ret
