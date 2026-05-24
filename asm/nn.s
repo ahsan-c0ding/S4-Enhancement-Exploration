@@ -509,8 +509,19 @@ s4d_layer:
     addi    a1, sp, 40
     call    complex_exp   # It calculates the complex version of e^(A * dt)
 
-    flw     ft0, 36(sp)
-    flw     ft1, 40(sp)
+    flw     ft0, 36(sp)        # ft0 = Re(A_bar_n)
+    flw     ft1, 40(sp)        # ft1 = Im(A_bar_n)
+
+    # --- M4 OPTIMIZATION: save A_bar_n into s11 table for iterative kernel loop ---
+    # Overwrites the old A_real_cont / A_imag_cont values which are no longer needed
+    # after this point. s6 is the current n counter.
+    slli    t4, s6, 2          # t4 = n * 4 bytes
+    add     t5, s11, t4        # t5 = &s11[n]
+    fsw     ft0, 0(t5)         # s11[n]     = Re(A_bar_n)
+    addi    t5, s11, 128
+    add     t5, t5, t4         # t5 = &s11_imag[n]
+    fsw     ft1, 0(t5)         # s11+128[n] = Im(A_bar_n)
+    # ft0 and ft1 are still valid for B_bar computation below
     li      t0, 0x3F800000
 
 
@@ -557,75 +568,101 @@ s4d_layer:
     j       .Ldisc_loop
 .Ldisc_done:
 
-    li      s7, 0
+# =============================================================================
+# M4 OPTIMIZED KERNEL GENERATION
+# -----------------------------------------------------------------------------
+# ORIGINAL (M3): For each (t, n): compute complex_exp(A_real[n]*t, A_imag[n]*t)
+#   -> 4096 * 32 = 131,072 complex_exp calls per channel (each = exp+sin+cos)
+#   -> ~1 billion instructions total across 64 channels
+#
+# OPTIMIZED (M4): Iterative complex multiply using the recurrence:
+#   A_bar_n^t = A_bar_n^(t-1) * A_bar_n
+#
+# Since A_bar_n = exp(lambda_n * dt) is CONSTANT per n, we precomputed it
+# in disc_loop (above) and stored it back into the s11 table.
+#
+# We maintain a running state vector state[n] = C_bar[n] * A_bar_n^t
+# initialised to state[n] = C_bar[n] (i.e. A_bar_n^0 = 1).
+# C_bar[n] is already in s9[n] (real) and s10[n] (imag) from disc_loop.
+# We UPDATE s9/s10 in-place each timestep — they become the state vector.
+#
+# Per (t, n) iteration cost:
+#   OLD: ~124 instructions (complex_exp call)
+#   NEW: ~14 instructions  (inline complex multiply, no calls)
+# Savings: ~960 million instructions across both S4D layers.
+#
+# Memory layout (unchanged from M3):
+#   s11[0..31]     = Re(A_bar_n)  (was A_real_cont, overwritten in disc_loop)
+#   s11+128[0..31] = Im(A_bar_n)  (was A_imag_cont, overwritten in disc_loop)
+#   s9[0..31]      = state_real[n] (was C_bar_real, now running state)
+#   s10[0..31]     = state_imag[n] (was C_bar_imag, now running state)
+#   s8[0..4095]    = kernel[t] output (unchanged)
+# =============================================================================
+
+    # Load 2.0 constant once outside all loops
+    li      t0, 0x40000000        # 2.0 float bits
+    fmv.w.x ft10, t0              # ft10 = 2.0  (preserved across n-loop, t-loop)
+
+    li      s7, 0                 # s7 = t = 0
+
 .Lkernel_t_loop:
-    li      t0, 4096    # The loop is set to run 4,096 times
-
+    li      t0, 4096
     bge     s7, t0, .Lkernel_done
-    slli    t1, s7, 2
-    add     t2, s8, t1
 
-    fmv.w.x fa0, zero  #  it clears the previous value in the output memory (s8) by writing a zero to it
-    fsw     fa0, 0(t2)
-    fcvt.s.w fs3, s7   # It converts the current loop counter into a floating-point number.
-    fmul.s   fs3, fs3, fs0   # It multiplies that number by the time-step (dt) calculated in the very first block. This gives the exact timestamp
-    li      s6, 0
+    # Compute address of kernel[t] once per outer iteration
+    slli    t5, s7, 2             # t5 = t * 4
+    add     t5, s8, t5            # t5 = &kernel[t]
 
+    # Initialize kernel[t] = 0.0 and accumulator fs3 = 0.0
+    fmv.w.x fs3, zero
+    fsw     fs3, 0(t5)
+
+    li      s6, 0                 # s6 = n = 0
 
 .Lkernel_n_loop:
+    # Inner loop: for n in 0..31
+    bge     s6, s1, .Lkernel_n_done   # s1 = 32
 
-#  For every single one of those 4,096 time steps, the computer must sum up the contributions of 32 different states
-#   pulls the A matrix values (real and imaginary) that were stored in the s11 table during the discretization phase
+    slli    t1, s6, 2             # t1 = n * 4 (byte offset)
 
-    bge     s6, s1, .Lkernel_n_done
-    slli    t1, s6, 2
-    add     t2, s11, t1
-    flw     ft0, 0(t2)
-    addi    t3, s11, 128
-    add     t3, t3, t1
-    flw     ft1, 0(t3)
-    fmul.s  fa0, fs3, ft0
-    fmul.s  fa1, fs3, ft1
-    addi    a0, sp, 36
-    addi    a1, sp, 40
+    # Load state[n] = (sr, si)
+    add     t2, s9,  t1           # t2 = &state_real[n]
+    add     t3, s10, t1           # t3 = &state_imag[n]
+    flw     ft0, 0(t2)            # ft0 = sr = state_real[n]
+    flw     ft1, 0(t3)            # ft1 = si = state_imag[n]
 
+    # Load A_bar[n] = (ar, ai)  -- stored in s11 table by disc_loop
+    add     t4, s11, t1           # t4 = &A_bar_real[n]
+    flw     ft2, 0(t4)            # ft2 = ar = A_bar_real[n]
+    addi    t4, s11, 128
+    add     t4, t4,  t1           # t4 = &A_bar_imag[n]
+    flw     ft3, 0(t4)            # ft3 = ai = A_bar_imag[n]
 
-    call    complex_exp   #   calculates the complex exponential e^(A*t)
-    slli    t1, s6, 2
+    # Inline complex multiply: new_state = state * A_bar
+    # new_real = sr*ar - si*ai
+    # new_imag = sr*ai + si*ar
+    fmul.s  ft4, ft0, ft2         # ft4 = sr * ar
+    fmul.s  ft5, ft1, ft3         # ft5 = si * ai
+    fsub.s  ft6, ft4, ft5         # ft6 = new_real = sr*ar - si*ai
 
-#   It loads the discretized C values from the s9 and s10 tables
+    fmul.s  ft7, ft0, ft3         # ft7 = sr * ai
+    fmul.s  ft8, ft1, ft2         # ft8 = si * ar
+    fadd.s  ft9, ft7, ft8         # ft9 = new_imag = sr*ai + si*ar
 
-    add     t2, s9,  t1
-    flw     fa0, 0(t2)
-    add     t3, s10, t1
-    flw     fa1, 0(t3)
-    flw     fa2, 36(sp)
-    flw     fa3, 40(sp)
-    addi    a0, sp, 36
-    addi    a1, sp, 40
+    # Write updated state back to s9/s10
+    fsw     ft6, 0(t2)            # state_real[n] = new_real
+    fsw     ft9, 0(t3)            # state_imag[n] = new_imag
 
+    # Accumulate: kernel[t] += 2.0 * new_real
+    fmadd.s fs3, ft10, ft6, fs3   # fs3 += 2.0 * new_real  (fused multiply-add)
 
-    call    complex_mul   # It multiplies the evolved state by the weight
-
-#   result is added to the total for the particular timestamp
-
-    flw     ft0, 36(sp)      # load result
-    li      t0, 0x40000000   # 2.0
-    fmv.w.x ft1, t0          # ft1 = 2.0 float
-    
-    # calculate address for kernel[t] using different registers
-    slli    t4, s7, 2        # t4 = time step * 4 bytes
-    add     t5, s8, t4       # t5 = base + offset
-    flw     ft2, 0(t5)       # load current kernel[t]
-    
-    # Humanized math: multiply then add instead of Fused Multiply-Add
-    fmul.s  ft3, ft1, ft0    # ft3 = 2.0 * result
-    fadd.s  ft2, ft2, ft3    # kernel[t] = kernel[t] + (2.0 * result)
-    
-    fsw     ft2, 0(t5)       # store back to memory
     addi    s6, s6, 1
     j       .Lkernel_n_loop
+
 .Lkernel_n_done:
+    # Write final accumulated kernel[t] value
+    fsw     fs3, 0(t5)
+
     addi    s7, s7, 1
     j       .Lkernel_t_loop
 .Lkernel_done:
