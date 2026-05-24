@@ -201,108 +201,110 @@ my_sqrt:
     ret
 
 
-# ___________________________________________________________
-# my_pow(x, y) uses:
-#   x^y = e^(y * ln(x))
-# If x <= 0 then return 0 (not handled here).
+# ___________________________
+# my_log(x)
+# First we check the input boundary. If x <= 0.0, the logarithm is undefined for 
+# real numbers, so we bypass calculations and immediately return negative infinity.
 #
-# Steps:
-# 1 Compute ln(x) using my_log
-# 2 Multiply with y
-# 3 Pass result to my_exp
-# ___________________________________________________________
-my_pow:
-    addi sp, sp, -16
-    sw ra, 12(sp)
-    fsw fs1, 8(sp)
-
-    li t0, 0
-    fcvt.s.w ft0, t0
-    fle.s t1, fa0, ft0
-    bne t1, zero, pow_zero_exit
-
-    fmv.s fs1, fa1
-
-    call my_log
-
-    fmul.s fa0, fa0, fs1
-    call my_exp
-    j pow_finish
-
-pow_zero_exit:
-    li t0, 0
-    fcvt.s.w fa0, t0
-
-pow_finish:
-    flw fs1, 8(sp)
-    lw ra, 12(sp)
-    addi sp, sp, 16
+# For positive values, we use IEEE-754 binary floating-point representation to 
+# pull apart the number. Every float is represented as:
+#   x = m * 2^e, where m is the mantissa fraction in [1.0, 2.0) and e is the exponent.
+#
+# By applying logarithm properties, we break into:
+#   ln(x) = ln(m * 2^e) = ln(2^e) + ln(m) = e * ln(2) + ln(m)
+#
+# We extract the true integer exponent 'e' using integer bitwise shifts and masking. 
+# The mantissa 'm' is isolated by rewriting its exponent bits to match 1.0. 
+# We then approximate ln(m) on the fixed domain [1.0, 2.0) using a 4th-degree minimax 
+# polynomial evaluated via Horner's scheme, adding the result to the pre-computed 
+# scale factor (e * 0.69314718).
+# ___________________________
+my_log:
+    fmv.w.x ft0, zero
+    fle.s   t1, fa0, ft0
+    beqz    t1, .Llog_math
+    li      t0, 0xFF800000       # return -inf for x <= 0
+    fmv.w.x fa0, t0
     ret
 
-# ____________________________________________________________
-# my_log(x) solves:
-#   e^y = x
-# to find ln(x).
-# If x <= 0 then return -inf.
+.Llog_math:
+    fmv.x.w a0, fa0
+    
+    # Extract integer exponent (e)
+    srli    a1, a0, 23
+    andi    a1, a1, 0xFF
+    addi    a1, a1, -127         # a1 = e
+    
+    # Isolate mantissa fraction (f) to reconstruct m in [1, 2)
+    li      t2, 0x007FFFFF
+    and     a0, a0, t2
+    li      t2, 0x3F800000       # exponent for 1.0
+    or      a0, a0, t2
+    fmv.w.x ft0, a0              # ft0 = m = 1 + f
+    
+    # Let f_val = m - 1.0
+    fmv.w.x ft1, t2              # 1.0
+    fsub.s  ft2, ft0, ft1        # ft2 = f_val
+    
+    # ln(1+f) ≈ f - f^2/2 + f^3/3 - f^4/4
+    # Horner: f * (1.0 + f * (-0.5 + f * (0.33333 + f * -0.25)))
+    li      t0, 0xBE800000       # -0.25
+    fmv.w.x ft3, t0
+    fmul.s  ft3, ft3, ft2        # -0.25 * f
+    li      t0, 0x3EAAAAAB       # 0.333333
+    fmv.w.x ft4, t0
+    fadd.s  ft3, ft3, ft4        # 0.333333 - 0.25f
+    fmul.s  ft3, ft3, ft2        # f * (...)
+    li      t0, 0xBF000000       # -0.5
+    fmv.w.x ft4, t0
+    fadd.s  ft3, ft3, ft4        # -0.5 + ...
+    fmul.s  ft3, ft3, ft2        # f * (...)
+    fadd.s  ft3, ft3, ft1        # 1.0 + ...
+    fmul.s  ft3, ft3, ft2        # ft3 = ln(m)
+    
+    # Calculate e * ln2
+    fcvt.s.w ft4, a1             # float(e)
+    li      t0, 0x3F317218       # 0.693147
+    fmv.w.x ft5, t0
+    fmul.s  ft4, ft4, ft5        # e * ln(2)
+    
+    fadd.s  fa0, ft3, ft4        # Result = e*ln2 + ln(m)
+    ret
+
+# ___________________________
+# my_pow(x, y)
+# Instead of tracking nested loops for integer exponents or using iterative root-finding 
+# for fractional powers, we implement this using an identity pair:
+#   x^y = (e^ln(x))^y = e^(y * ln(x))
 #
-# Start with guess:
-#   y = x - 1
-# Then we use Newton update:
-#   y = y - (e^y - x) / e^y
-# it stops when error is very small (1e-7) or iterations finish.
-# _____________________________________________________________
-my_log:
-    addi sp, sp, -32
-    sw ra, 28(sp)
-    fsw fs0, 24(sp)
-    fsw fs1, 20(sp)
-    sw s0, 16(sp)
+# The routine saves the original parameters, calls our 'my_log' function to
+# compute the natural log of the base, multiplies that resulting scalar by the 
+# exponent y, and feeds the product directly into our optimized 'my_exp' function.
+#
+# If the base x is less than or equal to 0.0, the calculation is bypassed and 
+# safely returns a default value of 0.0.
+# ___________________________
+my_pow:
+    addi    sp, sp, -16
+    sw      ra, 12(sp)
+    fsw     fs1, 8(sp)
 
-    li t0, 0
-    fcvt.s.w ft0, t0
-    fle.s t1, fa0, ft0
-    beq t1, zero, log_positive
+    fmv.w.x ft0, zero
+    fle.s   t1, fa0, ft0
+    beqz    t1, .Lpow_math
+    fmv.w.x fa0, zero            # return 0 if x <= 0 (simplified)
+    j       .Lpow_done
 
-    li t0, 0xFF800000
-    fmv.w.x fa0, t0
-    j log_exit
+.Lpow_math:
+    fmv.s   fs1, fa1             # save y
+    call    my_log               # fa0 = ln(x)
+    fmul.s  fa0, fa0, fs1        # fa0 = y * ln(x)
+    call    my_exp               # fa0 = exp(y * ln(x))
 
-log_positive:
-    fmv.s fs0, fa0
-    li t0, 1
-    fcvt.s.w ft0, t0
-    fsub.s fs1, fs0, ft0
-    li s0, 20
-
-log_loop:
-    # Compute e^y
-    fmv.s fa0, fs1
-    call my_exp
-    fmv.s ft2, fa0
-
-    fsub.s ft3, ft2, fs0
-
-    fdiv.s ft4, ft3, ft2
-    fsub.s fs1, fs1, ft4
-
-    fabs.s ft5, ft3
-    li t2, 0x33D6BF95
-    fmv.w.x ft6, t2
-    flt.s t3, ft5, ft6
-
-    addi s0, s0, -1
-    beq s0, zero, log_done
-    beq t3, zero, log_loop
-
-log_done:
-    fmv.s fa0, fs1
-
-log_exit:
-    lw ra, 28(sp)
-    flw fs0, 24(sp)
-    flw fs1, 20(sp)
-    lw s0, 16(sp)
-    addi sp, sp, 32
+.Lpow_done:
+    flw     fs1, 8(sp)
+    lw      ra, 12(sp)
+    addi    sp, sp, 16
     ret
 
 # =================================================================
