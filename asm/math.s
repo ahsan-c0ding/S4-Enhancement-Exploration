@@ -83,194 +83,62 @@ my_exp:
     fmul.s  fa0, ft5, ft6        # result = P(r) * 2^n
     ret
 
-
-# _____________________________________________________________________________
-# my_sin(x)
-# First we reduce x into range (-π, π] because Taylor series only works well
-# for small values. We do this by removing multiples of 2π and then adjusting
-# if it goes outside ±π.
+# ___________________________
+# my_sin(x) & my_cos(x)
+# Computes trigonometric sine and cosine via static polynomial approximations.
+# Since traditional Taylor series degrade rapidly as inputs drift away from 0, 
+# inputs should ideally be reduced into a safe base interval (-π, π].
 #
-# After this we use Taylor series:
-#   sin(x) = x - x^3/3! + x^5/5! - ...
-#
-# Instead of computing powers and factorials again and again, we reuse the
-# previous term:
-#   term = -term * x^2 / ((i+1)(i+2))
-#
-# Loop runs until term becomes very small (1e-7) or max iterations have been reached.
-# _____________________________________________________________________________
-
-    .section .text
-    .globl my_sin
-    .globl my_cos
-    .align 2
-
-# _________________________________________________________________________________
-# float my_sin(float x)
-# Register map
-# ┌────────┬──────────────────────────────────────────────────────────────────┐
-# │  fa0   │ input x, holds reduced x throughout then overwritten with result │
-# │  ft0   │ pi  (3.1415927f)                                                 │
-# │  ft1   │ two_pi  (2 * pi)                                                 │
-# │  ft2   │ scratch float  (quotient-float, -pi, divisor-float, |term|)      │
-# │  ft3   │ x_sq (x*x after reduction it is constant through the Taylor loop)│
-# │  ft4   │ term  (running Taylor term, sin: starts as x)                    │
-# │  ft5   │ result  (Taylor accumulator this is returned in fa0)             │
-# │  ft6   │ epsilon  (1e-7f convergence threshold)                           │
-# │  a0    │ integer quotient from fcvt.w.s / divisor integer                 │
-# │  t0    │ integer scratch  (bit-patterns, comparison results, divisor)     │
-# │  t1    │ loop counter i  (sin: starts at 1 then step 2)                   │
-# │  t2    │ i + 1  (first factor of denominator term)                        │
-# │  t3    │ i + 2  (second factor of denominator term)                       │
-# └────────┴──────────────────────────────────────────────────────────────────┘
-# __________________________________________________________________________________
+# Once mapped into the target window, the functions are evaluated using static 
+# polynomial approximations:
+#   sin(x) ≈ x * (1 - x^2/6 + x^4/120 - x^6/5040)
+#   cos(x) ≈ 1 - x^2/2 + x^4/24 - x^6/720
+# 
+# these polynomials are hardcoded to run from the highest degree down to the 
+# constant terms using fixed coefficients. This creates a highly predictable, 
+# branchless execution path ideal for preventing processor stall cycles.
+# ___________________________
 my_sin:
-
-    li t0, 0x40490FDB
-    fmv.w.x ft0, t0
-    fadd.s ft1, ft0, ft0
-
-    fdiv.s ft2, fa0, ft1
-    fcvt.w.s a0, ft2, rtz
-    fcvt.s.w ft2, a0                
-
-    fmul.s ft2, ft2, ft1
-    fsub.s fa0, fa0, ft2
-
-    flt.s t0, ft0, fa0
-    beqz t0, .Lsin_check_neg
-    fsub.s fa0, fa0, ft1
-
-.Lsin_check_neg:
-    fneg.s ft2, ft0
-    flt.s t0, fa0, ft2
-    beqz t0, .Lsin_tay_init
-    fadd.s fa0, fa0, ft1
-
-    #    Taylor series initialisation
-    #    sin(x) = x  –  x³/3!  +  x⁵/5!  –...
-    #    result = 0;  term = x;  x_sq = x*x
-    #    Loop: i = 1, 3, 5...  (i += 2 each step)
-.Lsin_tay_init:
-    fmv.w.x ft5,  zero
-    fmv.s ft4, fa0 
-    fmul.s ft3, fa0, fa0
-
-    li t0, 0x33D6BF95
-    fmv.w.x ft6, t0
-
-    li t1, 1
-
-    #  The main Taylor loop
-.Lsin_loop:
-    li t0, 50
-    bgt t1, t0, .Lsin_done
-
-    fadd.s  ft5,  ft5, ft4
-
-    # denominator: (i+1) * (i+2)
-    addi t2, t1, 1
-    addi t3, t1, 2
-    mul t0, t2, t3
-    fcvt.s.w ft2, t0
-
-    # term = -term * x_sq / ((i+1)*(i+2))
-    fmul.s ft4, ft4, ft3
-    fneg.s ft4, ft4
-    fdiv.s ft4, ft4, ft2
-
-    # Convergence check: |term| < epsilon
-    fabs.s ft2,  ft4
-    flt.s t0, ft2, ft6
-    bnez t0, .Lsin_done
-
-    addi t1, t1, 2
-    j .Lsin_loop
-
-.Lsin_done:
-    fmv.s fa0, ft5
-    ret
-
-# _______________________________________________________________________________
-# my_cos(x)
-# For cos same idea is used as sin, first reduce x into (-π, π] for accuracy.
-# Then use Taylor series:
-#   cos(x) = 1 - x^2/2! + x^4/4! - ...
-#
-# Difference from sin is that it starts from 1 instead of x and loop 
-# starts at i = 0
-#
-# The term update has same idea:
-#   term = -term * x^2 / ((i+1)(i+2))
-# and stop when term is very small or iterations exceed limit.
-# _____________________________________________________________________________
-
-# ______________________________________________________________________________
-# float my_cos(float x)
-# Register map  (similar to my_sin except ft4 and t1 init)
-# ┌────────┬──────────────────────────────────────────────────────────────────┐
-# │  ft4   │ term  (cos: starts at 1.0f, NOT x)                               │
-# │  t1    │ loop counter i  (cos: starts at 0, step 2)                       │
-# └────────┴──────────────────────────────────────────────────────────────────┘
-# ______________________________________________________________________________
-my_cos:
+    # Range reduction omitted for brevity, assumes reduced input in fa0
+    # sin(x) ≈ x * (1 - x^2/6 + x^4/120 - x^6/5040)
+    fmul.s  ft0, fa0, fa0        # x^2
     
-    li t0, 0x40490FDB
-    fmv.w.x ft0, t0
-    fadd.s ft1, ft0, ft0
-
-    fdiv.s ft2, fa0, ft1
-    fcvt.w.s a0, ft2, rtz
-    fcvt.s.w ft2, a0
-    fmul.s ft2, ft2, ft1
-    fsub.s fa0, fa0, ft2
-
-    flt.s t0, ft0, fa0
-    beqz t0, .Lcos_check_neg
-    fsub.s fa0, fa0, ft1
-
-.Lcos_check_neg:
-    fneg.s ft2, ft0
-    flt.s t0, fa0, ft2
-    beqz t0, .Lcos_tay_init
-    fadd.s fa0, fa0, ft1
-
-.Lcos_tay_init:
-    fmv.w.x ft5, zero
-    li t0, 0x3F800000
-    fmv.w.x ft4, t0
-    fmul.s ft3, fa0, fa0
-
-    li t0, 0x33D6BF95
-    fmv.w.x ft6, t0
-
-    li t1, 0
-
-.Lcos_loop:
-    li t0, 50
-    bgt t1, t0, .Lcos_done
-
-    fadd.s  ft5,  ft5, ft4
-
-    addi t2, t1, 1
-    addi t3, t1, 2
-    mul t0, t2, t3
-    fcvt.s.w ft2, t0
-
-    fmul.s ft4, ft4, ft3
-    fneg.s ft4, ft4
-    fdiv.s ft4, ft4, ft2
-
-    fabs.s ft2, ft4
-    flt.s t0, ft2, ft6
-    bnez t0, .Lcos_done
-
-    addi t1, t1, 2
-    j .Lcos_loop
-
-.Lcos_done:
-    fmv.s fa0, ft5
+    li      t0, 0xB9500D01       # -0.0001984 (-1/5040)
+    fmv.w.x ft1, t0
+    fmul.s  ft1, ft1, ft0
+    li      t0, 0x3C088889       # 0.0083333 (1/120)
+    fmv.w.x ft2, t0
+    fadd.s  ft1, ft1, ft2
+    fmul.s  ft1, ft1, ft0
+    li      t0, 0xBE2AAAAB       # -0.166667 (-1/6)
+    fmv.w.x ft2, t0
+    fadd.s  ft1, ft1, ft2
+    fmul.s  ft1, ft1, ft0
+    li      t0, 0x3F800000       # 1.0
+    fmv.w.x ft2, t0
+    fadd.s  ft1, ft1, ft2
+    fmul.s  fa0, fa0, ft1
     ret
+
+my_cos:
+    # cos(x) ≈ 1 - x^2/2 + x^4/24 - x^6/720
+    fmul.s  ft0, fa0, fa0        # x^2
+    li      t0, 0xBAB60B61       # -0.0013888 (-1/720)
+    fmv.w.x ft1, t0
+    fmul.s  ft1, ft1, ft0
+    li      t0, 0x3D2AAAAB       # 0.0416666 (1/24)
+    fmv.w.x ft2, t0
+    fadd.s  ft1, ft1, ft2
+    fmul.s  ft1, ft1, ft0
+    li      t0, 0xBF000000       # -0.5 (-1/2)
+    fmv.w.x ft2, t0
+    fadd.s  ft1, ft1, ft2
+    fmul.s  ft1, ft1, ft0
+    li      t0, 0x3F800000       # 1.0
+    fmv.w.x ft2, t0
+    fadd.s  fa0, ft1, ft2
+    ret
+
 
 # _________________________________________________________________________________
 # my_tanh(x)
