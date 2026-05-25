@@ -974,3 +974,263 @@ model_forward:
     lw   s3, 44(sp)
     addi sp, sp, 64
     ret
+
+____________________________________________________________________________________________________________________________________________________________
+  #s4d implementation using vector instructions
+_____________________________________________________________________________________________________________________________________________________________
+
+.L_s4d_channel_loop:
+    # 64 channels total
+    li      t0, 64
+    bge     s0, t0, .L_s4d_done
+
+    # Compute scalar dt = exp(log_dt[h])
+    slli    t1, s0, 2
+    add     t2, s6, t1
+    flw     fa0, 0(t2)
+    call    my_exp
+    fmv.s   fs0, fa0             # fs0 = dt (Preserved across inner loops)
+
+    # Discretization and kernel generation stack block
+    li      t0, 16960
+    sub     sp, sp, t0           # reserve 16960 bytes
+
+    # Backup scalar registers
+    sw      s6,   0(sp)
+    sw      s7,   4(sp)
+    sw      s8,   8(sp)
+    sw      s9,  12(sp)
+    sw      s10, 16(sp)
+    sw      s11, 20(sp)
+    fsw     fs1, 24(sp)
+    fsw     fs2, 28(sp)
+    fsw     fs3, 32(sp)
+
+    # Calculate static buffer pointers
+    li      t4, 64
+    add     s11, sp, t4          # A_bar table (Real: s11, Imag: s11+128)
+    li      t4, 320
+    add     s9, sp, t4           # C_bar_real
+    li      t4, 448
+    add     s10, sp, t4          # C_bar_imag
+    li      t4, 576
+    add     s8, sp, t4           # kernel output table
+
+    # =========================================================================
+    # M4 OPTIMIZATION: VECTORIZED DISCRETIZATION
+    # =========================================================================
+
+    # --- 1. Preload Math Constants (Hoisted outside vector loop) ---
+    # Exp/Log constants
+    li t1, 0x3FB8AA3B; fmv.w.x ft0, t1  # 1/ln2 = 1.442695
+    li t1, 0x3F317218; fmv.w.x ft1, t1  # ln2 = 0.693147
+    li t1, 0x3D2AAAAB; fmv.w.x ft2, t1  # 0.0416667
+    li t1, 0x3E2AAAAB; fmv.w.x ft3, t1  # 0.166667
+    li t1, 0x3F000000; fmv.w.x ft4, t1  # 0.5
+    li t1, 0x3F800000; fmv.w.x ft5, t1  # 1.0
+    
+    # Cos constants
+    li t1, 0xBAB60B61; fmv.w.x ft6, t1  # -1/720
+    li t1, 0x3D2AAAAB; fmv.w.x ft7, t1  # 1/24
+    li t1, 0xBF000000; fmv.w.x ft8, t1  # -1/2
+
+    # Sin constants
+    li t1, 0xB9500D01; fmv.w.x ft9, t1  # -1/5040
+    li t1, 0x3C088889; fmv.w.x ft10, t1 # 1/120
+    li t1, 0xBE2AAAAB; fmv.w.x ft11, t1 # -1/6
+    
+    # Exp Clamps
+    li t1, 0xC2B00000; fmv.w.x fa0, t1  # -88.0
+    li t1, 0x42B00000; fmv.w.x fa1, t1  # 88.0
+
+    # --- 2. Calculate Channel Base Pointers ---
+    slli    t0, s0, 5            # s0 * 32 (Base element offset for channel)
+    
+    # Standard contiguous arrays (stride 4 bytes)
+    slli    t1, t0, 2            # byte offset
+    add     t_Ar, s2, t1         # t_Ar = &log_A_real[channel]
+    add     t_Ai, s3, t1         # t_Ai = &A_imag[channel]
+    
+    # C arrays (stride-2, offset 8 bytes per channel element)
+    slli    t1, t0, 3            # byte offset (* 8)
+    add     t_Cr, s4, t1         # t_Cr = &C_real[channel]
+    add     t_Ci, s5, t1         # t_Ci = &C_imag[channel]
+
+    # Destination array pointers
+    mv      t_s9, s9             # &C_bar_real
+    mv      t_s10, s10           # &C_bar_imag
+    mv      t_s11_r, s11         # &A_bar_real
+    addi    t_s11_i, s11, 128    # &A_bar_imag
+
+    li      a6, 32               # Remaining elements to process
+
+.Ldisc_v_loop:
+    beqz    a6, .Ldisc_v_done
+
+    # Strip mining: Configure VL for LMUL=2, 32-bit floats
+    # Register map: v0,v2,v4,v6,v8,v10,v12,v14,v16,v18,v20
+    vsetvli t0, a6, e32, m2, ta, ma
+
+    # -----------------------------------------------------------------
+    # STEP 1: Compute A_cont_r = -exp(log_A_real), A_cont_i = A_imag
+    # -----------------------------------------------------------------
+    vle32.v v2, (t_Ar)           # v2 = x (log_A_real)
+    vle32.v v4, (t_Ai)           # v4 = A_cont_i
+
+    # Branchless clamp x to [-88.0, 88.0]
+    vfmax.vf v2, v2, fa0
+    vfmin.vf v2, v2, fa1
+
+    # Inline Exp(x)
+    vfmul.vf v6, v2, ft0         # x / ln2
+    vfcvt.x.f.v v8, v6           # integer n
+    vfcvt.f.x.v v6, v8           # float n
+    vfmul.vf v10, v6, ft1        # n * ln2
+    vfsub.vv v10, v2, v10        # r = x - n*ln2
+
+    # Horner P(r) -> v12
+    vfmv.v.f v12, ft2            # 0.0416667
+    vfmul.vv v12, v12, v10
+    vfadd.vf v12, v12, ft3       # + 0.166667
+    vfmul.vv v12, v12, v10
+    vfadd.vf v12, v12, ft4       # + 0.5
+    vfmul.vv v12, v12, v10
+    vfadd.vf v12, v12, ft5       # + 1.0
+    vfmul.vv v12, v12, v10
+    vfadd.vf v12, v12, ft5       # P(r)
+
+    vadd.vi v8, v8, 127          # Bias exponent
+    vsll.vi v8, v8, 23           # Shift to float bitfield
+    vfmul.vv v2, v12, v8         # v2 = exp(log_A_real)
+    
+    # fneg.s equivalent (flip sign bit using vfsgnjn.vv)
+    vfsgnjn.vv v2, v2, v2        # v2 = A_cont_r
+
+    # -----------------------------------------------------------------
+    # STEP 2: Compute A_bar = complex_exp(A_cont * dt)
+    # -----------------------------------------------------------------
+    vfmul.vf v6, v2, fs0         # v6 = A_r_dt
+    vfmul.vf v24, v4, fs0        # v24 = SAFE PRESERVED COPY OF A_i_dt (Replaces clobbered v8)
+
+    # Inline Exp(A_r_dt) -> v6
+    vfmax.vf v6, v6, fa0         # Clamp
+    vfmin.vf v6, v6, fa1
+
+    vfmul.vf v10, v6, ft0        # x / ln2
+    vfcvt.x.f.v v12, v10         # integer n
+    vfcvt.f.x.v v10, v12         # float n
+    vfmul.vf v14, v10, ft1       # n * ln2
+    vfsub.vv v14, v6, v14        # r
+
+    vfmv.v.f v16, ft2            # Horner sequence
+    vfmul.vv v16, v16, v14
+    vfadd.vf v16, v16, ft3
+    vfmul.vv v16, v16, v14
+    vfadd.vf v16, v16, ft4
+    vfmul.vv v16, v16, v14
+    vfadd.vf v16, v16, ft5
+    vfmul.vv v16, v16, v14
+    vfadd.vf v16, v16, ft5        # P(r)
+
+    vadd.vi v12, v12, 127
+    vsll.vi v12, v12, 23
+    vfmul.vv v6, v16, v12        # v6 = exp_a
+
+    # Inline Cos(A_i_dt) -> v10 and Sin(A_i_dt) -> v12
+    vfmul.vv v14, v24, v24       # v14 = x^2 (using our safe copy)
+
+    # Cosine Evaluation
+    vfmv.v.f v10, ft6            # -1/720
+    vfmul.vv v10, v10, v14
+    vfadd.vf v10, v10, ft7       # +1/24
+    vfmul.vv v10, v10, v14
+    vfadd.vf v10, v10, ft8       # -1/2
+    vfmul.vv v10, v10, v14
+    vfadd.vf v10, v10, ft5       # v10 = cos(A_i_dt)
+
+    # Sine Evaluation
+    vfmv.v.f v12, ft9            # -1/5040
+    vfmul.vv v12, v12, v14
+    vfadd.vf v12, v12, ft10      # +1/120
+    vfmul.vv v12, v12, v14
+    vfadd.vf v12, v12, ft11      # -1/6
+    vfmul.vv v12, v12, v14
+    vfadd.vf v12, v12, ft5       # +1.0
+    vfmul.vv v12, v12, v24       # Scale by safe x -> v12 = sin(A_i_dt)
+
+    # Scale by exp_a
+    vfmul.vv v10, v6, v10        # v10 = A_bar_r
+    vfmul.vv v12, v6, v12        # v12 = A_bar_i
+
+    # Store A_bar to s11 arrays (Cached for next kernel loops)
+    vse32.v v10, (t_s11_r)
+    vse32.v v12, (t_s11_i)
+
+    # -----------------------------------------------------------------
+    # STEP 3: Compute factor = (A_bar - 1) / A_cont
+    # -----------------------------------------------------------------
+    # num = A_bar - 1
+    vfsub.vf v10, v10, ft5       # v10 = num_r (A_bar_r - 1.0)
+
+    # den = A_cont_r^2 + A_cont_i^2 = v2^2 + v4^2
+    vfmul.vv v6, v2, v2
+    vfmul.vv v8, v4, v4
+    vfadd.vv v6, v6, v8          # v6 = den
+
+    # Fast Reciprocal Vector Pipeline Patch (Replaces sequential vfdiv blocks)
+    vfrdiv.vf v6, v6, ft5        # v6 = 1.0 / den
+
+    # factor_r = (num_r * A_r + num_i * A_i) * (1/den)
+    vfmul.vv v8, v10, v2
+    vfmul.vv v14, v12, v4
+    vfadd.vv v8, v8, v14
+    vfmul.vv v8, v8, v6          # v8 = factor_real
+
+    # factor_i = (num_i * A_r - num_r * A_i) * (1/den)
+    vfmul.vv v14, v12, v2
+    vfmul.vv v16, v10, v4
+    vfsub.vv v14, v14, v16
+    vfmul.vv v14, v14, v6        # v14 = factor_imag
+
+    # -----------------------------------------------------------------
+    # STEP 4: Compute C_bar = factor * C_cont
+    # -----------------------------------------------------------------
+    li      t1, 8                # Stride is 8 bytes
+    vlse32.v v10, (t_Cr), t1     # v10 = C_real
+    vlse32.v v12, (t_Ci), t1     # v12 = C_imag
+
+    # C_bar_r = factor_r * C_r - factor_i * C_i
+    vfmul.vv v16, v8, v10
+    vfmul.vv v18, v14, v12
+    vfsub.vv v16, v16, v18       # v16 = C_bar_real
+
+    # C_bar_i = factor_r * C_i + factor_i * C_r
+    vfmul.vv v18, v8, v12
+    vfmul.vv v20, v14, v10
+    vfadd.vv v18, v18, v20       # v18 = C_bar_imag
+
+    # Store finalized C_bar back to s9/s10
+    vse32.v v16, (t_s9)
+    vse32.v v18, (t_s10)
+
+    # -----------------------------------------------------------------
+    # STEP 5: Pointers & Loop Control
+    # -----------------------------------------------------------------
+    sub     a6, a6, t0           # Decrement elements left
+    
+    slli    t1, t0, 2            # Bytes processed (stride 4)
+    add     t_Ar, t_Ar, t1
+    add     t_Ai, t_Ai, t1
+    add     t_s9, t_s9, t1
+    add     t_s10, t_s10, t1
+    add     t_s11_r, t_s11_r, t1
+    add     t_s11_i, t_s11_i, t1
+
+    slli    t1, t0, 3            # Bytes processed (stride 8)
+    add     t_Cr, t_Cr, t1
+    add     t_Ci, t_Ci, t1
+
+    j       .Ldisc_v_loop
+
+.Ldisc_v_done:
+  
