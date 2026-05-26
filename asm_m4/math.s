@@ -10,7 +10,6 @@
 .global my_pow
 .global my_log
 
-# _____________________________________________________________________________
 # my_exp(x) (computes e^x):
 # We use a range reduction + polynomial approximation strategy to compute e^x efficiently
 # Working:
@@ -23,7 +22,6 @@
 # 4) Build 2^n by putting n directly into exponent bits of f32
 #
 # Rresult = P9r) * 2^n  
-# _____________________________________________________________________________
 my_exp:
     # Bounds checking
     li t0, 0xC2B00000
@@ -81,7 +79,6 @@ my_exp:
     fmul.s fa0, ft5, ft6        # result = P(r) * 2^n
     ret
 
-# __________________________________________________________________
 # my_sin(x) (computes sin(x))
 #
 # Working:
@@ -93,7 +90,6 @@ my_exp:
 #    Each new term = previous term * (-x²) / ((n+1)*(n+2))
 #    Stop when the current term is smaller than machine epsilon (~1e-7).
 #    This adapts to the input, the small x converges in very few steps.
-# ____________________________________________________________________
 my_sin:
     li t0, 0x40490FDB
     fmv.w.x ft0, t0
@@ -150,14 +146,12 @@ my_sin:
     fmv.s fa0, ft5
     ret
 
-# ______________________________________________________________________________
 # my_cos(x) — computes cos(x)
 #
 # Same structure as my_sin with two differences:
 # 1) Series starts at 1.0 (x^0 term) instead of x
 # 2) Loop steps through even powers instead of odd
 #    cos(x) = 1 - x²/2 + x⁴/24 - ...
-# ______________________________________________________________________________
 my_cos:
     li t0, 0x40490FDB
     fmv.w.x ft0, t0
@@ -215,7 +209,6 @@ my_cos:
     ret
 
 
-# _________________________________________________________________________________
 # my_tanh(x) (computes tanh(x))
 #
 # Working:
@@ -231,18 +224,17 @@ my_cos:
 #   By clamping x to [-7, 7] keeps it in the fitted range. At x=7 the rational
 #   gives ~0.99999, which is close enough to the true value of 0.9999983.
 #   Clamping uses fmax/fmin — no branches, no pipeline stalls.
-# _________________________________________________________________________________
 my_tanh:
     # Clamp x to [-7, 7] using two arithmetic ops (no branches)
     li t0, 0x40E00000
     fmv.w.x ft0, t0
-    fneg.s ft4, ft0\
+    fneg.s ft4, ft0
     fmax.s ft1, fa0, ft4        # ft1 = max(x, -7.0)   (clamp low side)
     fmin.s ft1, ft1, ft0        # ft1 = min(ft1, 7.0)  (clamp high side) = xc
 
     fmul.s ft0, ft1, ft1        # ft0 = xc^2  (Horner variable, reuses ft0)
 
-    # --- Numerator: xc * (a0 + xc^2*(a1 + xc^2*(a2 + xc^2*a3))) ---
+    # Numerator: xc * (a0 + xc^2*(a1 + xc^2*(a2 + xc^2*a3))) 
     li t0, 0x36622111
     fmv.w.x ft2, t0
     fmul.s ft2, ft2, ft0        # ft2 = a3*xc^2
@@ -278,16 +270,13 @@ my_tanh:
     fdiv.s fa0, ft2, ft3        # tanh(x) ~ Num / Den
     ret
 
-# ____________________________________________________________________________
 # my_sqrt(x)
 # Uses built-in optimized sqrt in RVV, replaces our Newton loop implementation.
-# _____________________________________________________________________________
 my_sqrt:
     fsqrt.s fa0, fa0
     ret
 
 
-# __________________________________________________________
 # my_log(x) (computes ln(x))
 #
 # Working:
@@ -302,7 +291,6 @@ my_sqrt:
 #    ln(m) is approximated over [1, 2) with a short polynomial:
 #      let f = m - 1  (so f is in [0, 1))
 #      ln(1+f) ≈ f*(1 - f/2 + f²/3 - f³/4)
-# ____________________________________________________________
 my_log:
     fmv.w.x ft0, zero
     fle.s t1, fa0, ft0
@@ -353,13 +341,11 @@ my_log:
     fadd.s fa0, ft3, ft4        # Result = e*ln2 + ln(m)
     ret
 
-# ________________________________________________________________
 # my_pow(x, y) (computes x^y)
 #
 # Working:
 # Uses the identity:  x^y = e^(y * ln(x))
 # So we just call my_log then my_exp with y multiplied in between it.
-# _________________________________________________________________
 my_pow:
     addi sp, sp, -16
     sw ra, 12(sp)
