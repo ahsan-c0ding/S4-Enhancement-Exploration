@@ -8,7 +8,6 @@
 .global my_pow
 .global my_log
 
-# _____________________________________________________________________________
 # my_exp(x)
 # First we apply bounds checking. If x is less than -88.0, the result underflows 
 # single-precision float limits and returns 0.0. If x exceeds 88.0, it overflows 
@@ -25,7 +24,6 @@
 # We approximate the remainder e^r on the tiny interval [-0.34657, 0.34657] using 
 # a 4th-degree Horner polynomial, P(r). Then, we reconstruct 2^n instantly by shifting 
 # the integer n directly into the exponent bitfield, avoiding adding a loop.
-# _____________________________________________________________________________
 my_exp:
     # Bounds checking
     li      t0, 0xC2B00000       # -88.0
@@ -83,7 +81,6 @@ my_exp:
     fmul.s  fa0, ft5, ft6        # result = P(r) * 2^n
     ret
 
-# ___________________________
 # my_sin(x) & my_cos(x)
 # Computes trigonometric sine and cosine via static polynomial approximations.
 # Since traditional Taylor series degrade rapidly as inputs drift away from 0, 
@@ -97,7 +94,6 @@ my_exp:
 # these polynomials are hardcoded to run from the highest degree down to the 
 # constant terms using fixed coefficients. This creates a highly predictable, 
 # branchless execution path ideal for preventing processor stall cycles.
-# ___________________________
 my_sin:
     li t0, 0x40490FDB
     fmv.w.x ft0, t0
@@ -154,7 +150,6 @@ my_sin:
     fmv.s fa0, ft5
     ret
 
-# ______________________________________________________________________________
 my_cos:
     li t0, 0x40490FDB
     fmv.w.x ft0, t0
@@ -211,8 +206,6 @@ my_cos:
     fmv.s fa0, ft5
     ret
 
-
-# _________________________________________________________________________________
 # my_tanh(x)   [M4 ACCURACY UPGRADE — BRANCHLESS]
 #
 # The old M4 draft used a low-degree [3/3] Pade with a |x|>4.0 hard clamp. That
@@ -252,9 +245,8 @@ my_cos:
 #   ft2 = numerator accumulator
 #   ft3 = denominator accumulator
 #   ft4, ft5 = scratch for loading each coefficient
-# _________________________________________________________________________________
 my_tanh:
-    # --- Branchless input clamp: xc = min(max(x, -7.0), 7.0) ---
+    # Branchless input clamp: xc = min(max(x, -7.0), 7.0) 
     # tanh saturates, so we cap the magnitude of x BEFORE the polynomial. Two
     # arithmetic ops (fmax, fmin) replace the old data-dependent branch entirely.
     li      t0, 0x40E00000       # 7.0
@@ -265,7 +257,7 @@ my_tanh:
 
     fmul.s  ft0, ft1, ft1        # ft0 = xc^2  (Horner variable, reuses ft0)
 
-    # --- Numerator: xc * (a0 + xc^2*(a1 + xc^2*(a2 + xc^2*a3))) ---
+    # Numerator: xc * (a0 + xc^2*(a1 + xc^2*(a2 + xc^2*a3)))
     li      t0, 0x36622111       # a3 = 3.3695871e-06
     fmv.w.x ft2, t0              # ft2 = a3
     fmul.s  ft2, ft2, ft0        # ft2 = a3*xc^2
@@ -301,16 +293,13 @@ my_tanh:
     fdiv.s  fa0, ft2, ft3        # tanh(x) ~ Num / Den
     ret
 
-# _________________________________________________________________
 # my_sqrt(x)
 # Uses built-in optimized sqrt in RVV, replaces our Newton loop implementation.
-# _________________________________________________________________
 my_sqrt:
     fsqrt.s fa0, fa0
     ret
 
 
-# ___________________________
 # my_log(x)
 # First we check the input boundary. If x <= 0.0, the logarithm is undefined for 
 # real numbers, so we bypass calculations and immediately return negative infinity.
@@ -327,7 +316,6 @@ my_sqrt:
 # We then approximate ln(m) on the fixed domain [1.0, 2.0) using a 4th-degree minimax 
 # polynomial evaluated via Horner's scheme, adding the result to the pre-computed 
 # scale factor (e * 0.69314718).
-# ___________________________
 my_log:
     fmv.w.x ft0, zero
     fle.s   t1, fa0, ft0
@@ -379,8 +367,7 @@ my_log:
     
     fadd.s  fa0, ft3, ft4        # Result = e*ln2 + ln(m)
     ret
-
-# ___________________________
+    
 # my_pow(x, y)
 # Instead of tracking nested loops for integer exponents or using iterative root-finding 
 # for fractional powers, we implement this using an identity pair:
@@ -392,7 +379,7 @@ my_log:
 #
 # If the base x is less than or equal to 0.0, the calculation is bypassed and 
 # safely returns a default value of 0.0.
-# ___________________________
+
 my_pow:
     addi    sp, sp, -16
     sw      ra, 12(sp)
@@ -415,12 +402,10 @@ my_pow:
     lw      ra, 12(sp)
     addi    sp, sp, 16
     ret
-
-# =================================================================
+    
 #  M4 VECTOR BLOCKS
 #  Don't touch these yet. We'll use them later when we refactor 
 #  nn.s to pass array pointers directly instead of looping floats.
-# =================================================================
 .global v_my_tanh
 
 # v_my_tanh
