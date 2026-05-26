@@ -1140,7 +1140,7 @@ s4d_layer:
 .L_conv_j_vec_loop:
     beqz t1, .L_conv_j_vec_done
 
-    # ---- 5a. ARTIFICIAL VECTOR THROTTLE ---------------------------------
+    # 5a. ARTIFICIAL VECTOR THROTTLE 
     # Instead of letting the hardware pick max VL, we cap it at 4.
     # This increases the loop iterations, pushing the instruction count 
     # to roughly ~4 Billion for a more conservative benchmark.
@@ -1153,21 +1153,21 @@ s4d_layer:
     # Use m1 (single register) since VL is very small
     vsetvli t2, t2, e32, m1, ta, ma   
 
-    # ---- 5b. Load kernel[jstart .. jstart+VL-1] (contiguous forward) ----
+    # 5b. Load kernel[jstart .. jstart+VL-1] (contiguous forward)
     vle32.v  v2, (a1)         # v2 = kernel strip
 
-    # ---- 5c. Load input[k-jstart][h] backwards with stride -256 --------
+    # 5c. Load input[k-jstart][h] backwards with stride -256
     li       t3, -256
     vlse32.v v4, (a0), t3     # v4 = input strip (stride=-256)
 
-    # ---- 5d. Elementwise multiply: kernel[j] * input[k-j][h] -----------
+    # 5d. Elementwise multiply: kernel[j] * input[k-j][h] 
     vfmul.vv v2, v2, v4       
 
-    # ---- 5e. Ordered reduction into the running accumulator v1 ----------
+    # 5e. Ordered reduction into the running accumulator v1 
     # Both v2 and v1 are m1, so this is perfectly safe and won't alias.
     vfredosum.vs v1, v2, v1   
 
-    # ---- 5f. Advance pointers and decrement remaining count -------------
+    # 5f. Advance pointers and decrement remaining count 
     slli t3, t2, 2            # t3 = VL * 4 bytes
     add  a1, a1, t3           # Kernel pointer forward
 
