@@ -438,8 +438,8 @@ v_my_tanh:
     # Numerator: x * (1.0 + 0.10001*x^2)
     li      t1, 0x3DCCCCD0             # 0.10001
     fmv.w.x ft0, t1
-    vfmv.v.f v24, ft0
-    vfmacc.vv v24, v16, v24            # v24 = 0.10001 * x^2
+    vfmul.vf v24, v16, ft0             # v24 = 0.10001 * x^2 (Fixed!)
+    
     li      t1, 0x3F800000             # 1.0
     fmv.w.x ft1, t1
     vfadd.vf v24, v24, ft1             # v24 = 1.0 + 0.10001*x^2
