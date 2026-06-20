@@ -1,183 +1,68 @@
-# S4 Galaxy Classification - Team 0x43 Repository
+# Milestone 4: RISC-V Vector Implementation (S4 Galaxy Classifier)
 
-This repository provides starter code, utilities, and infrastructure for implementing S4-based galaxy morphology classification. It includes data loaders, model interfaces, visualization tools, and a reference S4D implementation.
-  
-**Requirements:** Python 3.11+, PyTorch 2.0+, CUDA (optional)
-
-## Overview
-
-This base repository contains:
-- **Data loaders** for GalaxyMNIST dataset
-- **Model scaffolding** with TODOs for implementation
-- **Reference S4D layer** (fully implemented)
-- **Utility functions** for Hilbert curves and sequence processing
-- **Interactive GUI** for model exploration
-- **Training infrastructure** with notebook and utilities
+This repository contains the complete, validated RISC-V 32-bit Vector (RVV) assembly implementation of the S4D inference pipeline for Galaxy Classification. It builds upon the scalar baseline by utilizing vector strip-mining, branchless vector math approximations, and optimized memory strides to significantly reduce the dynamic instruction count.
 
 ## Repository Structure
 
-```
-space-state-model/
-├── README.md # Project overview, setup instructions, and usage guide
-|
-├── requirements.txt # Python dependencies required to run the project
-│
-├── main.py # Interactive visualization tool (e.g., exploring models/outputs)
-│
-├── utils.py # Helper functions used throughout the project
-│
-├── Hilbertplot.py # Create Hilbert Plot image into /images folder
-│
-├── model/ # model implementations
-│ ├── init.py # Marks this directory as a Python package
-| |
-│ ├── gclassifier.py # Galaxy classification model (Hilbert + S4D pipeline)
-| |
-│ ├── s4d.py # S4D implementation (FFT-based convolution)
-| |
-│ ├── s4d_modified.py # Modified S4D (direct conv1d version for simplicity)
-| |
-│ ├── s4_conv.py # Convolution-based S4 implementation
-| |
-│ ├── s4_recurrent.py # Recurrent S4 implementation
-| |
-│ ├── hilbert.py # Hilbert curve mapping (2D image → 1D sequence)
-| |
-│ ├── tlts.py # TakeLastTimestep layer (extracts final sequence state)
-| |
-│ ├── interface.py # Unified interface for different S4 model variants
-| |
-│ ├── functions.py # Utility/helper functions used across models
-| |
-│ ├── verify_my_task.py # Script for verifying correctness of implementations
-| |
-│ └── gui.py # GUI components for visualization/debugging
-│
-├── export/ # Scripts for exporting and testing trained models
-│ ├── export_weights.py # Saves trained model weights
-│ │
-│ ├── generate_test_data.py # Generates test inputs for evaluation
-│ │
-│ └── run_test.py # Runs inference using exported models
-│
-├── scripts/ # Training and execution scripts
-│ ├── train.ipynb # Notebook-based training pipeline
-│ │
-│ └── train.py # Script-based training
-│
-├──  tests/ # Unit tests and validation scripts
-| ├── test_forward.py # Tests forward pass of models
-│ |
-| | test_s4_equivalence.py # Verifies recurrent vs convolution S4 equivalence
-│ |
-| └── test_s4d_fft_conv.py # Benchmarks FFT vs direct convolution in S4D
-└─
-```
+* `/asm_m4/` - Contains all core assembly source files (`main.s`, `math.s`, `nn.s`), the data samples (`data_0.s` to `data_9.s`), and the automated Python/Bash evaluation scripts.
+* `Makefile` - The build system required to compile the assembly files.
+* `.gitignore` - Ensures repository hygiene by excluding compiled binaries and logs.
 
-## Installation
+## Deployment and Evaluation Guide
 
-```bash
-cd space-state-model
-pip install -r requirements.txt
-```
+The files in this repository are packaged for deployment into a standard `riscv-env-setup` workspace. Please follow these instructions carefully to replicate the validation results and benchmark the speedup.
 
-## Model Modules
+### Step 1: Environment Preparation
 
-### Core Components
+This code requires the RISC-V GNU Toolchain, QEMU, and VeeR-iSS configured with Vector Extension (RVV 1.0) support. It is assumed you are running this within the provided Docker container (via VS Code Dev Containers) or an environment where `riscv32-unknown-elf-gcc` is in your system PATH.
 
-**`model/gclassifier.py`** - Galaxy classifier architecture:
-- `GalaxyClassifierS4D` - Main model combining Hilbert scanning, S4 layers, classification head
-- Completed `forward()` method
+Copy the contents of the deployment package directly into the root of your `riscv-env-setup` directory:
 
-**`model/s4d.py`** - Diagonal S4 layer: 
-- Fully implemented reference implementation
-- Study for S4 architecture patterns, FFT convolution, diagonal parameterization
+1. Copy all files from the `asm_m4` directory into the root of your environment:
+`cp -r CAAL-S4-Galaxy/asm_m4/* /path/to/riscv-env-setup/`
 
-**`model/hilbert.py`** - Hilbert curve utilities: 
-- `HilbertScan` - Converts 2D images to 1D sequences
-- Completed `_d2xy()` method
+### Step 2: Task 2 Validation (Automated QEMU Extraction)
 
-**`model/tlts.py`** - Sequence pooling: 
-- `TakeLastTimestep` - Extracts final timestep for classification
-- Implemented extraction logic
+We have provided an automated script (`run_task2_qemu_final.py`) that handles file stitching, GCC compilation (with `-march=rv32gcv`), QEMU execution, output extraction, and MSE/MAE calculation against the PyTorch reference binaries.
 
-**`model/functions.py`** - Helper utilities
-- Matrix operations, discretization methods
+Navigate to the root of your `riscv-env-setup` directory and run:
+`python3 run_task2_qemu_final.py`
 
-## Training
+**Expected Behavior:** The script will iterate through samples 0 to 9. For each sample, it will execute the fully vectorized forward pass via QEMU, extract the floating-point probabilities, and evaluate them. Because the code utilizes an artificial vector length throttle (capped at VL=4) to produce realistic edge-device cycle counts, QEMU will take slightly longer per sample than a pure scalar run. It will output a 10/10 PASS End-to-End match.
 
-Interactive training notebook with step-by-step explanations:
+### Step 3: Task 3.3.1 (Static Instruction Profile)
 
-```bash
-jupyter notebook train.ipynb
-```
+To generate the static instruction count and family classification directly from the source code, run the following script:
+`python3 m4_static_count.py`
 
-The notebook includes:
-- Data loading and preprocessing
-- Model initialization
-- Training loop with validation
-- Logging and visualization
+### Step 4: Task 3.3.2 (Dynamic Instruction Profile - VeeR-iSS)
 
-## Interactive Visualization Tool
+To evaluate the architectural performance and extract the dynamic instruction breakdown, we have fully automated the VeeR-iSS simulation.
 
-Launch the interactive galaxy explorer GUI:
+To generate the profile for Sample 0, simply run the provided bash script:
+`./run_final_benchmark.sh`
 
-```bash
-python main.py --python -m galaxy_s4_model.pth
-```
+**Expected Behavior:** This script automatically concatenates `main.s`, `nn.s`, `math.s`, and `data_0.s`, compiles them, and executes the binary through VeeR-iSS using the `whisper.json` configuration. The simulation takes approximately 90 to 120 seconds. Once complete, it automatically triggers `parse_veer_profile.py` to print the final LaTeX table, proving the heavy utilization of V-type instructions and the massive reduction in overall instruction count.
 
-Full usage:
+## Troubleshooting Guide
 
-```
-usage: main.py [-h] (--python | --riscv) [--model-path MODEL_PATH] [--colored] [--data-dir DATA_DIR]
+### Issue 1: "FileNotFoundError: [Errno 2] No such file or directory: 'riscv32-unknown-elf-gcc'"
 
-Interactive Galaxy Classification Visualization Tool
+**Cause:** The Python scripts rely on the `subprocess` module to call GCC and QEMU. If you execute the scripts in a standard terminal (outside the VS Code Dev Container), Linux will not be able to locate the compiler.
+**Solution A:** Ensure you have opened the `riscv-env-setup` folder in VS Code and selected "Reopen in Container". Run the script from the VS Code terminal.
+**Solution B:** If you are bypassing Docker, manually edit the subprocess calls in the Python scripts to match the exact absolute path of your local toolchain (e.g., `/opt/riscv/bin/riscv32-unknown-elf-gcc`).
 
-options:
-  -h, --help            show this help message and exit
-  --python, -p          Use Python model implementation
-  --riscv               Use RISC-V model implementation
-  --model-path MODEL_PATH, -m MODEL_PATH
-                        Path to trained model file (default: galaxy_s4_model.pth)
-  --colored, -c         Use colored (RGB) images instead of grayscale (default: grayscale)
-  --data-dir DATA_DIR   Root directory for dataset (default: ./data)
+### Issue 2: "QEMU Timed Out for Sample X"
 
-Examples:
-  main.py --python -m galaxy_model.pth
-  main.py -p -m galaxy_model.pth --colored
-  main.py --riscv
-```
+**Cause:** The automated testing script sets a timeout for QEMU execution. Because the M4 implementation heavily utilizes the RVV extension and explicitly throttles the Vector Length (VL) to simulate realistic hardware constraints, QEMU must translate billions of micro-operations into x86 instructions.
+**Solution:** Open `run_task2_qemu_final.py`, locate the `subprocess.run` call for QEMU, and increase the timeout threshold to allow the emulation to finish.
 
-### Controls
+### Issue 3: "Illegal Instruction" during QEMU or VeeR-iSS Execution
 
-- **LEFT Arrow** - Previous sample
-- **RIGHT Arrow** - Next sample
-- **R** - Random sample
-- **Q** - Quit
+**Cause:** The simulator or compiler was not instructed to enable the Vector Extension.
+**Solution:** Ensure that the `-march=rv32gcv` flag is present in all GCC compilation commands, and that QEMU is invoked with `-cpu rv32,v=true`. The provided `run_final_benchmark.sh` and Python scripts already include these flags by default.
 
-## Fixed Constraints
+### Issue 4: "Missing floats in Sample X" or "IndexError" during Array Slicing
 
-These values are fixed for the required multi-milestone compatibility:
-
-- `d_model = 64` - Hidden dimension
-- `d_state = 64` - State space dimension
-- `image_size = 64` - Image resolution
-- `num_classes = 4` - Galaxy morphology classes
-
-## Dependencies
-
-Key packages:
-- `torch` - Deep learning framework
-- `numpy` - Numerical computing
-- `matplotlib` - Visualization
-- `pygame` - GUI framework
-- `einops` - Tensor operations
-- `galaxy_mnist` - Dataset loader
-
-## Support
-
-**Technical Questions:** s.taha.29208@khi.iba.edu.pk
-
-**References:**
-- Gu et al. (2022) - "Efficiently Modeling Long Sequences with Structured State Spaces" (ICLR)
-- Gu et al. (2022) - "On the Parameterization and Initialization of Diagonal State Space Models" (NeurIPS)
+**Cause:** This occurs if QEMU fails to execute completely, resulting in a truncated stdout log. This is often caused by a missing linker script.
+**Solution:** Ensure that the `veer/link.ld` file is present in your environment, as the GCC compilation commands explicitly depend on it for correct memory layout.
