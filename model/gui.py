@@ -113,25 +113,26 @@ class GalaxyExplorerGUI:
         """
         self.screen.fill(self.COLOR_BG)
         
-        # 1. Get the raw image (Assumes shape is [C, H, W] or [H, W, C])
+        # x_val is always (N, C, H, W) -- so raw_img here is always channel-first,
+        # never (H, W, C). The "or [H, W, C]" in the old comment was never actually
+        # reachable, and assuming it was is what broke grayscale rendering below.
         raw_img = self.x_val[self.current_idx].numpy()
         
         if self.use_magma:
-            # If toggled, treat as grayscale for colormap (take first channel or mean)
-            if raw_img.ndim == 3:
-                gray_img = raw_img.mean(axis=0) if raw_img.shape[0] == 3 else raw_img.mean(axis=2)
-            else:
-                gray_img = raw_img
+            # mean over the channel axis works whether C=1 (trivial mean, same as
+            # squeezing) or C=3 (proper RGB->gray average) -- no need to special-case
+            gray_img = raw_img.mean(axis=0)
             
             magma_img = self.cmap(gray_img) 
             rgb_render = (magma_img[:, :, :3] * 255).astype(np.uint8)
         else:
             # Standard RGB Render
-            # Ensure format is (H, W, C) for Pygame
-            if raw_img.shape[0] == 3: # If (3, 64, 64)
-                rgb_render = raw_img.transpose(1, 2, 0)
-            else:
-                rgb_render = raw_img
+            # Pygame wants (H, W, 3) uint8. Grayscale data is (1, H, W) -- transposing
+            # alone gives (H, W, 1), which pygame's make_surface rejects (last dim must
+            # be exactly 3), so we tile the single channel across R/G/B instead.
+            rgb_render = raw_img.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+            if rgb_render.shape[-1] == 1:
+                rgb_render = np.repeat(rgb_render, 3, axis=-1)
             
             # Ensure uint8 [0, 255]
             if rgb_render.max() <= 1.0:
