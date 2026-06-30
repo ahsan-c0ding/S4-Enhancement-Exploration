@@ -177,6 +177,12 @@ print(f"Number of classes: {NUM_CLASSES}")
 
 BATCH_SIZE = 16
 
+# Heads up: GalaxyClassifierS4D now uses the recurrent S4D layer (model/s4d_recurrent.py),
+# not the old FFT one. Forward is fine either way, but backward through it keeps an autograd
+# node for every one of the L=4096 steps, x2 stacked layers -- memory scales with L*B, not
+# just B. BATCH_SIZE=16 OOM'd outright on a small (~4GB) box; if training crashes on yours,
+# drop this before anything else, and check GPU/RAM headroom either way.
+
 # Split into train/validation sets
 x_train, x_val, y_train_onehot, y_val_onehot = train_test_split(X, y_onehot, test_size=0.2, random_state=RNG_SEED, stratify=y)
 

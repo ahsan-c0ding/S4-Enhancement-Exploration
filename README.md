@@ -28,18 +28,19 @@ space-state-model/
 │
 ├── Hilbertplot.py # Create Hilbert Plot image into /images folder
 │
+├── images/ # Report figures (Hilbert scan, confusion matrix, training curves,
+│ │ # recurrent-vs-causal-conv verification plot)
+│
 ├── model/ # model implementations
 │ ├── init.py # Marks this directory as a Python package
 | |
 │ ├── gclassifier.py # Galaxy classification model (Hilbert + S4D pipeline)
 | |
-│ ├── s4d.py # S4D implementation (FFT-based convolution)
+│ ├── s4d_recurrent.py # S4D implementation (recurrent, diagonal -- used by gclassifier.py)
 | |
-│ ├── s4d_modified.py # Modified S4D (direct conv1d version for simplicity)
+│ ├── s4_conv.py # Convolution-based S4 implementation (Milestone 1, dense/non-diagonal)
 | |
-│ ├── s4_conv.py # Convolution-based S4 implementation
-| |
-│ ├── s4_recurrent.py # Recurrent S4 implementation
+│ ├── s4_recurrent.py # Recurrent S4 implementation (Milestone 1, dense/non-diagonal)
 | |
 │ ├── hilbert.py # Hilbert curve mapping (2D image → 1D sequence)
 | |
@@ -68,9 +69,7 @@ space-state-model/
 ├──  tests/ # Unit tests and validation scripts
 | ├── test_forward.py # Tests forward pass of models
 │ |
-| | test_s4_equivalence.py # Verifies recurrent vs convolution S4 equivalence
-│ |
-| └── test_s4d_fft_conv.py # Benchmarks FFT vs direct convolution in S4D
+| | test_s4_equivalence.py # Verifies recurrent vs convolution S4 equivalence (Milestone 1, dense)
 └─
 ```
 
@@ -89,9 +88,10 @@ pip install -r requirements.txt
 - `GalaxyClassifierS4D` - Main model combining Hilbert scanning, S4 layers, classification head
 - Completed `forward()` method
 
-**`model/s4d.py`** - Diagonal S4 layer: 
-- Fully implemented reference implementation
-- Study for S4 architecture patterns, FFT convolution, diagonal parameterization
+**`model/s4d_recurrent.py`** - Diagonal S4 layer: 
+- Fully implemented, recurrent forward pass (steps through the sequence instead of convolving)
+- Same parameterization as the old FFT layer, so existing checkpoints load unchanged
+- Study for S4 architecture patterns, ZOH discretization, diagonal parameterization
 
 **`model/hilbert.py`** - Hilbert curve utilities: 
 - `HilbertScan` - Converts 2D images to 1D sequences

@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from .hilbert import HilbertScan
 from .tlts import TakeLastTimestep
-from .s4d import S4D
+from .s4d_recurrent import S4D
 
 class GalaxyClassifierS4D(nn.Module):
     """
@@ -65,7 +65,9 @@ class GalaxyClassifierS4D(nn.Module):
 
         self.uproject = nn.Linear(self.hilbert_channels, d_model)
 
-        # S4 layers
+        # S4 layers -- recurrent, not the old FFT/causal-conv layer. Verified
+        # against the trained checkpoint first (see recurrent_vs_causal_conv_verification.png):
+        # logits matched to ~6e-4, same argmax on every sample. Conv layer's gone now.
         self.s4_1 = S4D(d_model=d_model, d_state=s4_state, transposed=False)
         self.act1 = nn.GELU()
 
@@ -99,19 +101,26 @@ class GalaxyClassifierS4D(nn.Module):
 
 
         # -------------------------------------------------------------------------
-        # FLOPS ESTIMATION (Task 8.5)
-        # Sequence Length L = 4096, d_model = 64, C = 1
+        # FLOPS ESTIMATION (Task 8.5) -- redone for the recurrent S4D layer
+        # Sequence Length L = 4096, d_model = 64, d_state = 64, C = 1
         # -------------------------------------------------------------------------
         # 1. Input Projection: L * C * d_model
         #    4096 * 1 * 64 = 262,144 Ops
         #
-        # 2. S4D Layers (x2): 2 * (L * log2(L) * d_model)
-        #    2 * (4096 * 12 * 64) = 6,291,456 Ops
+        # 2. S4D Layers (x2): no more FFT kernel, so no log(L) term. Each layer
+        #    steps through L timesteps, and at each step does ~2 complex MACs per
+        #    state element (one for the state update, one for the output sum) --
+        #    a complex MAC costs roughly 4x a real one, call it ~8 real ops:
+        #    2 * (L * (d_state/2) * d_model * 8) = 2 * (4096*32*64*8) ≈ 134.2M Ops
         #
         # 3. Classifier Head: d_model * Classes
         #    64 * 4 = 256 Ops
         #
-        # GRAND TOTAL: ~6.55 Million Operations per forward pass
+        # GRAND TOTAL: ~134.5 Million Operations per forward pass
+        # (vs. ~6.55M under the old FFT estimate -- more raw arithmetic, since
+        # we lost the O(log L) speedup, but no transcendental-heavy kernel
+        # generation either, which is most of why it still benchmarks faster
+        # in practice at this d_model -- see model/s4d_recurrent.py)
         # -------------------------------------------------------------------------
 
     def forward(self, x, return_logits=False):
