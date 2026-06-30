@@ -45,15 +45,14 @@ void linear_fc(
 
 //S4D Layer: (4096, 64) -> (4096, 64) - Core sequence modeling component
 void s4d_layer(
-    float input[SEQ_LEN][D_MODEL],		//Input is squence of shape(4096, 64)
-    float output[SEQ_LEN][D_MODEL],		//Output is sequence of shape (4096, 64)
-    //S4DParams* params (Since struct is not being used anymore we will separately implement components
-    const float* log_dt, //Log step size for each channel (64)
-    const float* log_A_real, //Real part of log A matrix (64, 32) flattened
-    const float* A_imag,  //Imaginary part of matrix A (64, 32)
-    const float* C_real, //Imaginary part of matrix C (64, 32)
-    const float* C_imag,  //Imaginary part of matrix C
-    const float* D // Feedthrough matrix(64)
+    float input[SEQ_LEN][D_MODEL],
+    float output[SEQ_LEN][D_MODEL],
+    const float* log_dt,
+    const float* log_A_real,
+    const float* A_imag,
+    const float* C_real,
+    const float* C_imag,
+    const float* D
 );
 
 //GELU Activation: Applies Gaussian Error Linear Unit to input array

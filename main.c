@@ -39,7 +39,7 @@ int main(int argc, char *argv[]) {
     const float* model_weights = (const float*)raw_weights_aligned;
 
     printf(" Booting up S4 Galaxy Classifier Engine (No-Math-Lib Edition)...\n");
-    printf("Running forward pass (calculating O(L^2) convolutions twice)...\n");
+    printf("Running forward pass (recurrent S4D, O(L*N) per layer)...\n");
     
     model_forward(input_image, output_probs, model_weights, hilbert_indices);
 

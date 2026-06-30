@@ -88,6 +88,16 @@ void linear_fc(
 }
 
 
+// Diagonal S4D layer -- recurrent formulation.
+//
+// The old implementation built an explicit kernel and did an O(L^2) causal
+// convolution. This one discretizes A and B once per channel (O(N)), then
+// walks the sequence with a simple state-update loop (O(L*N)). At L=4096,
+// N=32, that's ~125x fewer multiply-adds per channel, which shows up in the
+// wall-clock time.
+//
+// The math is the same ZOH discretization the report derives in Section III.A --
+// just applied element-wise since A is diagonal, so no matrix-exp is needed.
 void s4d_layer(
     float input[SEQ_LEN][D_MODEL],
     float output[SEQ_LEN][D_MODEL],
@@ -101,70 +111,55 @@ void s4d_layer(
     int half_state = D_STATE / 2;  // 32
 
     for (int h = 0; h < D_MODEL; h++) {
-        printf("\rProcessing S4D channel %d out of 64...", h + 1);
-        fflush(stdout); 
-        
         float dt = my_exp(log_dt[h]);
-        float kernel[SEQ_LEN];
-        
-        // Arrays to hold our properly discretized C_bar
-        float C_bar_real_arr[32];
-        float C_bar_imag_arr[32];
-        float lambda_real_arr[32];
-        float lambda_imag_arr[32];
 
-        // 1. Discretize C -> C_bar using Complex Division
+        float A_bar_real_arr[32], A_bar_imag_arr[32];
+        float B_bar_real_arr[32], B_bar_imag_arr[32];
+
+        // Discretize once per channel -- these stay constant for all 4096 timesteps.
         for (int n = 0; n < half_state; n++) {
             float lambda_real = -my_exp(log_A_real[h * half_state + n]);
             float lambda_imag = A_imag[h * half_state + n];
-            lambda_real_arr[n] = lambda_real;
-            lambda_imag_arr[n] = lambda_imag;
 
-            // Compute A_bar
-            float A_bar_real, A_bar_imag;
-            complex_exp(lambda_real * dt, lambda_imag * dt, &A_bar_real, &A_bar_imag);
+            // A_bar = exp(lambda * dt)
+            complex_exp(lambda_real * dt, lambda_imag * dt, &A_bar_real_arr[n], &A_bar_imag_arr[n]);
 
-            // Compute Complex Division: Z = (A_bar - 1) / lambda
-            float N_real = A_bar_real - 1.0f;
-            float N_imag = A_bar_imag;
+            // B_bar = (A_bar - 1) / lambda. B is fixed at 1 in this parameterization,
+            // so there's nothing extra to multiply in -- B_bar is the whole input gain.
+            float N_real = A_bar_real_arr[n] - 1.0f;
+            float N_imag = A_bar_imag_arr[n];
             float denom = lambda_real * lambda_real + lambda_imag * lambda_imag;
-            
-            float Z_real = (N_real * lambda_real + N_imag * lambda_imag) / denom;
-            float Z_imag = (N_imag * lambda_real - N_real * lambda_imag) / denom;
 
-            // Compute C_bar = C * Z
-            float C_real_val = C_real[(h * half_state + n) * 2];
-            float C_imag_val = C_imag[(h * half_state + n) * 2];
-
-            complex_mul(C_real_val, C_imag_val, Z_real, Z_imag, &C_bar_real_arr[n], &C_bar_imag_arr[n]);
+            B_bar_real_arr[n] = (N_real * lambda_real + N_imag * lambda_imag) / denom;
+            B_bar_imag_arr[n] = (N_imag * lambda_real - N_real * lambda_imag) / denom;
         }
 
-        // 2. Generate kernel using Direct Exponential Scaling
+        // State vector for this channel, zeroed at t=0.
+        float x_real[32] = {0};
+        float x_imag[32] = {0};
+
         for (int t = 0; t < SEQ_LEN; t++) {
-            kernel[t] = 0.0f;
-            
+            float u_t = input[t][h];
+            float y = D[h] * u_t;  // feedthrough term, same as before
+
             for (int n = 0; n < half_state; n++) {
-                float t_dt = t * dt; 
-                
-                // Compute A_bar^t directly: exp(t * dt * lambda)
-                float A_bar_t_real, A_bar_t_imag;
-                complex_exp(t_dt * lambda_real_arr[n], t_dt * lambda_imag_arr[n], &A_bar_t_real, &A_bar_t_imag);
+                // x_t = A_bar * x_{t-1} + B_bar * u_t
+                float decayed_real, decayed_imag;
+                complex_mul(A_bar_real_arr[n], A_bar_imag_arr[n], x_real[n], x_imag[n], &decayed_real, &decayed_imag);
 
-                // Multiply C_bar * A_bar^t
+                x_real[n] = decayed_real + B_bar_real_arr[n] * u_t;
+                x_imag[n] = decayed_imag + B_bar_imag_arr[n] * u_t;
+
+                // y_t += 2*Re(C * x_t). The factor of 2 accounts for the conjugate
+                // pair we never explicitly store -- we only keep n//2 modes.
                 float term_real, term_imag;
-                complex_mul(C_bar_real_arr[n], C_bar_imag_arr[n], A_bar_t_real, A_bar_t_imag, &term_real, &term_imag);
-
-                // Add to kernel
-                kernel[t] += 2.0f * term_real;
+                float C_real_val = C_real[(h * half_state + n) * 2];
+                float C_imag_val = C_imag[(h * half_state + n) * 2];
+                complex_mul(C_real_val, C_imag_val, x_real[n], x_imag[n], &term_real, &term_imag);
+                y += 2.0f * term_real;
             }
-        }
 
-        // 3. Causal convolution
-        for (int k = 0; k < SEQ_LEN; k++) {
-            output[k][h] = D[h] * input[k][h];
-            for (int j = 0; j <= k; j++) {
-                output[k][h] += kernel[j] * input[k - j][h];
-            }
+            output[t][h] = y;
         }
     }
 }
