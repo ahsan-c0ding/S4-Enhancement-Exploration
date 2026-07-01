@@ -21,7 +21,7 @@ void hilbert_scan(float input[IN_CHANNELS][IMG_SIZE][IMG_SIZE], float output[SEQ
     for (int d = 0 ; d < SEQ_LEN ; d++) {
         int flat_idx = hilbert_indices[d];
         
-        // SAFETY BOUNDS CHECK to prevent Segfaults if binary file formatting is weird
+        // safety check to prevent Segfaults if binary file formatting is weird
         if (flat_idx < 0 || flat_idx >= IMG_SIZE * IMG_SIZE) {
             flat_idx = 0; 
         }
@@ -55,16 +55,14 @@ void linear(
 }
 
 
-// Diagonal S4D layer -- recurrent formulation.
+// Diagonal S4D layer Recurrent Implementation
 //
-// The old implementation built an explicit kernel and did an O(L^2) causal
+// The previous implementation built an explicit kernel and did an O(L^2) causal
 // convolution. This one discretizes A and B once per channel (O(N)), then
-// walks the sequence with a simple state-update loop (O(L*N)). At L=4096,
-// N=32, that's ~125x fewer multiply-adds per channel, which shows up in the
-// wall-clock time.
+// walks the sequence with a simple state-update loop (O(L*N))
 //
-// The math is the same ZOH discretization the report derives in Section III.A --
-// just applied element-wise since A is diagonal, so no matrix-exp is needed.
+// The math is the same ZOH discretization from our report,just applied 
+// element-wise since A is diagonal, so no matrix-exp is needed.
 void s4d_layer(
     float input[SEQ_LEN][D_MODEL],
     float output[SEQ_LEN][D_MODEL],
@@ -83,7 +81,7 @@ void s4d_layer(
         float A_bar_real_arr[32], A_bar_imag_arr[32];
         float B_bar_real_arr[32], B_bar_imag_arr[32];
 
-        // Discretize once per channel -- these stay constant for all 4096 timesteps.
+        // Discretize once per channel, these stay constant for all 4096 timesteps.
         for (int n = 0; n < half_state; n++) {
             float lambda_real = -my_exp(log_A_real[h * half_state + n]);
             float lambda_imag = A_imag[h * half_state + n];
@@ -92,7 +90,7 @@ void s4d_layer(
             complex_exp(lambda_real * dt, lambda_imag * dt, &A_bar_real_arr[n], &A_bar_imag_arr[n]);
 
             // B_bar = (A_bar - 1) / lambda. B is fixed at 1 in this parameterization,
-            // so there's nothing extra to multiply in -- B_bar is the whole input gain.
+            // so there's nothing extra to multiply in, B_bar is the whole input gain.
             float N_real = A_bar_real_arr[n] - 1.0f;
             float N_imag = A_bar_imag_arr[n];
             float denom = lambda_real * lambda_real + lambda_imag * lambda_imag;
@@ -118,7 +116,7 @@ void s4d_layer(
                 x_imag[n] = decayed_imag + B_bar_imag_arr[n] * u_t;
 
                 // y_t += 2*Re(C * x_t). The factor of 2 accounts for the conjugate
-                // pair we never explicitly store -- we only keep n//2 modes.
+                // pair we never explicitly store, we only keep n//2 modes.
                 float term_real, term_imag;
                 float C_real_val = C_real[(h * half_state + n) * 2];
                 float C_imag_val = C_imag[(h * half_state + n) * 2];

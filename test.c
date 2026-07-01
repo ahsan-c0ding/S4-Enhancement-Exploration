@@ -14,7 +14,7 @@ int load_bin(const char* filepath, float* buffer, int expected_floats) {
     return read == expected_floats;
 }
 
-// Computes MSE/MAE and checks against rubric thresholds [cite: 204, 205, 206, 207]
+// Computes MSE/MAE and checks against rubric thresholds
 int validate_layer(const char* name, float* c_out, float* py_out, int size, double mse_thresh, double mae_thresh) {
     double mse = 0.0, mae = 0.0, max_err = 0.0;
     for(int i = 0; i < size; i++) {

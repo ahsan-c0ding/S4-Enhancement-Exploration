@@ -172,7 +172,7 @@ Passing thresholds ensure numerical equivalence between implementations.
 
 ---
 ##  Automated Batch Validation (Task 2)
-The rubric requires rigorous validation across multiple samples[cite: 751]. We provide a Python wrapper to automate layer-by-layer validation across the entire test suite. 
+The rubric requires rigorous validation across multiple samples. We provide a Python wrapper to automate layer-by-layer validation across the entire test suite. 
 
 ```bash
 cd ../export
