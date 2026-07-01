@@ -16,7 +16,9 @@ void hilbert_scan(
     const int* hilbert_indices			        //Pre-computed indices from weights go here
 );
 
-// Generic Linear Layer: handles both sequence and vector inputs
+// Generic Linear Layer: handles both sequence and vector inputs.
+// For uproject: batch_size=SEQ_LEN, in_features=IN_CHANNELS, out_features=D_MODEL
+// For fc:       batch_size=1,       in_features=D_MODEL,     out_features=N_CLASSES
 void linear(
     const float* input,    // flat input  [batch_size × in_features]
     float* output,         // flat output [batch_size × out_features]
@@ -25,22 +27,6 @@ void linear(
     int batch_size,
     int in_features,
     int out_features
-);
-
-//Input Projection Layer: (4096, C) -> (4096, 64)
-void linear_uproject(
-    float input[SEQ_LEN][IN_CHANNELS],			//Input sequence of shape (4096, C) from Hilbert scan
-    float output[SEQ_LEN][D_MODEL],			//Output sequence of shape (4096, 64) projected features
-    const float weight[D_MODEL][IN_CHANNELS],			//Weight matrix of shape (64, C) stored in row-major order
-    const float bias[D_MODEL]					//Bias vector of shape (64)
-);
-
-//Final Classification Layer: (64) -> (4)
-void linear_fc(
-    const float input[D_MODEL],			//Input feature vector of shape (64) after TakeLastTimestamp
-    float output[N_CLASSES],			//Output class scores of shape (4) before softmax
-    const float weight[N_CLASSES][D_MODEL],		//Weight matrix of shape (4, 64) in row-major order
-    const float bias[N_CLASSES]			//Bias vector of shape (4)
 );
 
 //S4D Layer: (4096, 64) -> (4096, 64) - Core sequence modeling component

@@ -34,7 +34,6 @@ void hilbert_scan(float input[IN_CHANNELS][IMG_SIZE][IMG_SIZE], float output[SEQ
     }
 }
 
-//Generic linear layer implementation (linear uproject & fc kept for compatibility with main.c and test.c)
 void linear(
     const float* input,
     float* output,
@@ -51,38 +50,6 @@ void linear(
                 acc += input[i * in_features + k] * weight[j * in_features + k];
             }
             output[i * out_features + j] = acc;
-        }
-    }
-}
-
-
-void linear_uproject(
-    float input[SEQ_LEN][IN_CHANNELS],
-    float output[SEQ_LEN][D_MODEL],
-    const float weight[D_MODEL][IN_CHANNELS],
-    const float bias[D_MODEL]
-) {
-    for (int i = 0; i < SEQ_LEN; i++) {
-        for (int j = 0; j < D_MODEL; j++) {
-            output[i][j] = bias[j];
-            for (int k = 0; k < IN_CHANNELS; k++) {
-                output[i][j] += input[i][k] * weight[j][k];
-            }
-        }
-    }
-}
-
-
-void linear_fc(
-    const float input[D_MODEL],
-    float output[N_CLASSES],
-    const float weight[N_CLASSES][D_MODEL],
-    const float bias[N_CLASSES]
-) {
-    for (int i = 0; i < N_CLASSES; i++) {
-        output[i] = bias[i];
-        for (int j = 0; j < D_MODEL; j++) {
-            output[i] += input[j] * weight[i][j];
         }
     }
 }
@@ -291,9 +258,9 @@ void model_forward(
     hilbert_scan(image, hilbert_out, hilbert_indices);
 
     // 2. Input Projection
-    linear_uproject(hilbert_out, proj_out, 
-                    (const float(*)[IN_CHANNELS])uproject_weight,
-                    uproject_bias);
+    linear((float*)hilbert_out, (float*)proj_out,
+           uproject_weight, uproject_bias,
+           SEQ_LEN, IN_CHANNELS, D_MODEL);
 
     // 3. S4D Layer 1
     s4d_layer(proj_out, s4d1_out,
@@ -315,9 +282,9 @@ void model_forward(
     take_last_timestamp(s4d2_out, pooled);
 
     // 8. Final Classification
-    linear_fc(pooled, logits,
-              (const float(*)[D_MODEL])fc_weight,
-              fc_bias);
+    linear(pooled, logits,
+           fc_weight, fc_bias,
+           1, D_MODEL, N_CLASSES);
 
     // 9. Softmax
     for (int i = 0; i < N_CLASSES; i++) {

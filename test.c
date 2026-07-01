@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
     passed_all &= validate_layer("Hilbert Scan", (float*)hilbert_out, py_ref, 4096 * 1, 1e-12, 1e-12); 
 
     // 2. UProject
-    linear_uproject(hilbert_out, proj_out, (const float(*)[IN_CHANNELS])uproj_w, uproj_b);
+    linear((float*)hilbert_out, (float*)proj_out, uproj_w, uproj_b, SEQ_LEN, IN_CHANNELS, D_MODEL);
     sprintf(filepath, "%s_uproject.bin", prefix); load_bin(filepath, py_ref, 4096 * 64);
     passed_all &= validate_layer("Linear (UProject)", (float*)proj_out, py_ref, 4096 * 64, 1e-8, 1e-6); 
 
@@ -142,7 +142,7 @@ int main(int argc, char *argv[]) {
     passed_all &= validate_layer("Take Last", pooled, py_ref, 64, 5e-7, 1e-3); 
 
     // 8. FC (Logits)
-    linear_fc(pooled, logits, (const float(*)[D_MODEL])fc_w, fc_b);
+    linear(pooled, logits, fc_w, fc_b, 1, D_MODEL, N_CLASSES);
     for(int i=0; i<4; i++) probs[i] = logits[i]; // copy for softmax
     sprintf(filepath, "%s_fc.bin", prefix); load_bin(filepath, py_ref, 4);
     passed_all &= validate_layer("FC (Logits)", logits, py_ref, 4, 1e-6, 1e-3); 
