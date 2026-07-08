@@ -64,9 +64,13 @@ int main(int argc, char *argv[]) {
 
     // Load Weights
     FILE *f_w = fopen("model_params/model_weights.bin", "rb");
-    if (!f_w) return 1;
+    if (!f_w) {
+        printf("Error: Could not open model_params/model_weights.bin\n");
+        return 1;
+    }
     if (fread(raw_weights, sizeof(float), WEIGHTS_SIZE_FLOATS, f_w) != WEIGHTS_SIZE_FLOATS) {
         printf("Error reading weights file.\n");
+        fclose(f_w);
         return 1;
     }
     fclose(f_w);
@@ -104,52 +108,61 @@ int main(int argc, char *argv[]) {
     printf("===================================================================================\n");
     int passed_all = 1;
 
-// 1. Hilbert
+    // 1. Hilbert
     hilbert_scan(input_image, hilbert_out, hilbert_indices);
-    sprintf(filepath, "%s_hilbert.bin", prefix); load_bin(filepath, py_ref, 4096 * 1);
+    sprintf(filepath, "%s_hilbert.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4096 * 1)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Hilbert Scan", (float*)hilbert_out, py_ref, 4096 * 1, 1e-12, 1e-12); 
 
     // 2. UProject
     linear((float*)hilbert_out, (float*)proj_out, uproj_w, uproj_b, SEQ_LEN, IN_CHANNELS, D_MODEL);
-    sprintf(filepath, "%s_uproject.bin", prefix); load_bin(filepath, py_ref, 4096 * 64);
+    sprintf(filepath, "%s_uproject.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Linear (UProject)", (float*)proj_out, py_ref, 4096 * 64, 1e-8, 1e-6); 
 
     // 3. S4D 1
     s4d_layer(proj_out, s4d1_out, s4_1_dt, s4_1_Ar, s4_1_Ai, s4_1_Cr, s4_1_Ci, s4_1_D);
     printf("\r"); // Clear the printing carriage return from s4d
-    sprintf(filepath, "%s_s4_1.bin", prefix); load_bin(filepath, py_ref, 4096 * 64);
+    sprintf(filepath, "%s_s4_1.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("S4D Layer 1", (float*)s4d1_out, py_ref, 4096 * 64, 1e-7, 5e-4); 
 
     // 4. GELU 1
     gelu((float*)s4d1_out, 4096 * 64);
-    sprintf(filepath, "%s_gelu_1.bin", prefix); load_bin(filepath, py_ref, 4096 * 64);
+    sprintf(filepath, "%s_gelu_1.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("GELU 1", (float*)s4d1_out, py_ref, 4096 * 64, 1e-7, 5e-4); 
 
     // 5. S4D 2 (Accumulated error increases thresholds slightly)
     s4d_layer(s4d1_out, s4d2_out, s4_2_dt, s4_2_Ar, s4_2_Ai, s4_2_Cr, s4_2_Ci, s4_2_D);
     printf("\r");
-    sprintf(filepath, "%s_s4_2.bin", prefix); load_bin(filepath, py_ref, 4096 * 64);
+    sprintf(filepath, "%s_s4_2.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("S4D Layer 2", (float*)s4d2_out, py_ref, 4096 * 64, 5e-7, 1e-3); 
 
     // 6. GELU 2
     gelu((float*)s4d2_out, 4096 * 64);
-    sprintf(filepath, "%s_gelu_2.bin", prefix); load_bin(filepath, py_ref, 4096 * 64);
+    sprintf(filepath, "%s_gelu_2.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("GELU 2", (float*)s4d2_out, py_ref, 4096 * 64, 5e-7, 1e-3); 
 
     // 7. Take Last (Inherits GELU 2 error)
     take_last_timestamp(s4d2_out, pooled);
-    sprintf(filepath, "%s_takelast.bin", prefix); load_bin(filepath, py_ref, 64);
+    sprintf(filepath, "%s_takelast.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Take Last", pooled, py_ref, 64, 5e-7, 1e-3); 
 
     // 8. FC (Logits)
     linear(pooled, logits, fc_w, fc_b, 1, D_MODEL, N_CLASSES);
     for(int i=0; i<4; i++) probs[i] = logits[i]; // copy for softmax
-    sprintf(filepath, "%s_fc.bin", prefix); load_bin(filepath, py_ref, 4);
+    sprintf(filepath, "%s_fc.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("FC (Logits)", logits, py_ref, 4, 1e-6, 1e-3); 
 
     // 9. Softmax (Normalizes everything back down to strict rubric limits!)
     softmax(probs, 4);
-    sprintf(filepath, "%s_softmax.bin", prefix); load_bin(filepath, py_ref, 4);
+    sprintf(filepath, "%s_softmax.bin", prefix); 
+    if (!load_bin(filepath, py_ref, 4)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Softmax", probs, py_ref, 4, 1e-8, 1e-4); 
 
     printf("===================================================================================\n");
