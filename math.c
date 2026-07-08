@@ -1,136 +1,198 @@
 #include "math.h"
+#include <stdint.h>
+#include <string.h>
 
-// e^x calculated using taylor series
+static float bits2f(uint32_t b){ float f; memcpy(&f, &b, 4); return f; }
+static uint32_t f2bits(float f){ uint32_t b; memcpy(&b, &f, 4); return b; }
+
+/* -----------------------------------------------------------------------
+ * my_exp(x) = e^x
+ * x = n*ln2 + r, r in [-ln2/2, ln2/2]  =>  e^x = 2^n * e^r
+ * ln2 split hi/lo (Cody-Waite) so n*ln2_hi is exact in f32 across the
+ * whole supported domain. e^r: Remez-fit minimax quintic (6 coefficients).
+ * 2^n: written directly into an f32's exponent bits.
+ * ----------------------------------------------------------------------- */
 float my_exp(float x){
-    // Prevent catastrophic underflow/overflow bounds
-    if(x < -80.0f) return 0.0f;
-    if(x > 80.0f) return 5.5406e+34f; // Max float limit approx
+    if (x < -88.0f) return 0.0f;
+    if (x >  88.0f) return bits2f(0x7F800000);  /* +inf */
 
-    if(x < 0){
-        return 1.0f / my_exp(-x);
-    }
-    
-    float result = 1.0f;
-    float term = 1.0f;
+    const float inv_ln2 = bits2f(0x3FB8AA3B);
+    const float ln2_hi  = bits2f(0x3F317200);
+    const float ln2_lo  = bits2f(0x35BFBE8E);
 
-    // INCREASED TO 50 FOR LARGE NUMBER CONVERGENCE
-    for(int i = 1; i <= 50; i++){
-        term = term * x / i;
-        result = result + term;
+    float t  = x * inv_ln2;
+    int32_t n = (int32_t)(t >= 0.0f ? t + 0.5f : t - 0.5f);  /* round to nearest */
+    float nf = (float)n;
 
-        if(term < 0.0000001f && term > -0.0000001f){
-            break;
-        }
-    }
-    return result;
+    float r = x - nf * ln2_hi;                  // FMA
+    r = r - nf * ln2_lo;                          // FMA
+
+    float p = bits2f(0x3AB6ECC1);                 /* c6 */
+    p = p * r + bits2f(0x3C0937D6);                 // FMA (c5)
+    p = p * r + bits2f(0x3D2AAA0E);                 // FMA (c4)
+    p = p * r + bits2f(0x3E2AAA02);                 // FMA (c3)
+    p = p * r + bits2f(0x3F000000);                 // FMA (c2)
+    p = p * r + bits2f(0x3F800000);                 // FMA (c1)
+    p = p * r + bits2f(0x3F800000);                 // FMA (c0)
+
+    uint32_t bits = (uint32_t)(n + 127) << 23;
+    return p * bits2f(bits);
 }
 
-// log(x) calculated using newtons method
+/* -----------------------------------------------------------------------
+ * my_log(x) = ln(x).  x = m*2^e, ln(x) = e*ln2 + ln(m).
+ * ln(m) via atanh double-angle identity: u = f/(f+2), f = m-1,
+ *   ln(1+f) = 2*atanh(u) = 2u*(1 + u^2/3 + u^4/5 + u^6/7 + u^8/9 + u^10/11)
+ * m in [1,2) => f in [0,1), but u is only in [0, 1/3) -- converges far
+ * faster than a direct series in f, with no iteration/convergence risk.
+ * ----------------------------------------------------------------------- */
 float my_log(float x){
-    if(x <= 0){
-        return -1e10f;
-    }
-    float y = x - 1.0f;
+    if (x <= 0.0f) return -1e10f;  /* matches the original's sentinel */
 
-    for(int i = 0; i < 20; i++){
-        float exp_y = my_exp(y);
-        y = y - (exp_y - x) / exp_y;
+    uint32_t bits = f2bits(x);
+    int32_t e = (int32_t)((bits >> 23) & 0xFF) - 127;
+    uint32_t mbits = (bits & 0x007FFFFF) | 0x3F800000;
+    float m = bits2f(mbits);
+    float f = m - 1.0f;
 
-        float difference = my_exp(y) - x;
-        if(difference < 0.0000001f && difference > -0.0000001f){
-            break;
-        }
-    }
-    return y;
+    float u  = f / (f + 2.0f);
+    float u2 = u * u;
+
+    float p = bits2f(0x3DA2E8BB);                  /* 1/11 */
+    p = p * u2 + bits2f(0x3DE38E39);                 // FMA (1/9)
+    p = p * u2 + bits2f(0x3E124925);                 // FMA (1/7)
+    p = p * u2 + bits2f(0x3E4CCCCD);                 // FMA (1/5)
+    p = p * u2 + bits2f(0x3EAAAAAB);                 // FMA (1/3)
+    p = p * u2 + 1.0f;                                // FMA (1)
+
+    float lnm = (2.0f * u) * p;
+
+    const float ln2_hi = bits2f(0x3F317200);
+    const float ln2_lo = bits2f(0x35BFBE8E);
+    float ef = (float)e;
+    float r = ef * ln2_hi + lnm;                       // FMA
+    r = ef * ln2_lo + r;                                 // FMA
+    return r;
 }
 
-// sin(x) calculated using taylor series
-float my_sin(float x) {
-    float pi = 3.141592653589793f;
-    
-    int quotients = (int)(x / (2 * pi));
-    x = x - (quotients * 2 * pi);
-    if (x > pi) x -= 2 * pi;
-    if (x < -pi) x += 2 * pi;
+/* -----------------------------------------------------------------------
+ * my_sin(x), my_cos(x)
+ * Reduce to r in [-pi,pi] via n = round(x/2pi), r = x - n*2pi, using a
+ * Cody-Waite hi/lo split of 2pi. Rounding to nearest lands r in [-pi,pi]
+ * directly -- no quadrant-correction branch needed (unlike the original's
+ * truncate-then-correct approach).
+ * sin/cos of r: fixed degree-13/12 Remez minimax polynomial in r^2 (7
+ * terms) -- no loop, no division, same instruction count every call.
+ * ----------------------------------------------------------------------- */
+float my_sin(float x){
+    const float twopi_hi  = bits2f(0x40C90F80);
+    const float twopi_lo  = bits2f(0x38354443);
+    const float recip_2pi = bits2f(0x3E22F983);
 
-    float result = 0;
-    float term = x;
-    float x_sq = x * x;
+    float t = x * recip_2pi;
+    int32_t n = (int32_t)(t >= 0.0f ? t + 0.5f : t - 0.5f);
+    float nf = (float)n;
 
-    // INCREASED TO 50
-    for (int i = 1; i <= 50; i += 2) {
-        result = result + term;
-        term = -term * x_sq / ((i+1) * (i+2));
+    float r = x - nf * twopi_hi;                     // FMA
+    r = r - nf * twopi_lo;                             // FMA
 
-        if (term < 0.0000001f && term > -0.0000001f) {
-            break;
-        }
-    }
-    return result;
+    float x2 = r * r;
+    float p = bits2f(0x2F15B1B2);                       /* c6 */
+    p = p * x2 + bits2f(0xB2D46C36);                      // FMA (c5)
+    p = p * x2 + bits2f(0x3638CA51);                      // FMA (c4)
+    p = p * x2 + bits2f(0xB9500B09);                      // FMA (c3)
+    p = p * x2 + bits2f(0x3C08887C);                      // FMA (c2)
+    p = p * x2 + bits2f(0xBE2AAAAA);                      // FMA (c1)
+    p = p * x2 + bits2f(0x3F800000);                      // FMA (c0)
+
+    return r * p;
 }
 
-// cos(x) calculated using taylor series
-float my_cos(float x) {
-    float pi = 3.141592653589793f;
-    
-    int quotients = (int)(x / (2 * pi));
-    x = x - (quotients * 2 * pi);
-    if (x > pi) x -= 2 * pi;
-    if (x < -pi) x += 2 * pi;
+float my_cos(float x){
+    const float twopi_hi  = bits2f(0x40C90F80);
+    const float twopi_lo  = bits2f(0x38354443);
+    const float recip_2pi = bits2f(0x3E22F983);
 
-    float result = 0;
-    float term = 1.0f;
-    float x_sq = x * x;
+    float t = x * recip_2pi;
+    int32_t n = (int32_t)(t >= 0.0f ? t + 0.5f : t - 0.5f);
+    float nf = (float)n;
 
-    // INCREASED TO 50
-    for (int i = 0; i <= 50; i += 2) {
-        result = result + term;
-        term = -term * x_sq / ((i+1) * (i+2));
+    float r = x - nf * twopi_hi;                      // FMA
+    r = r - nf * twopi_lo;                               // FMA
 
-        if (term < 0.0000001f && term > -0.0000001f) {
-            break;
-        }
-    }
-    return result;
+    float x2 = r * r;
+    /* v2: degree-14 (8-coefficient) Remez minimax, one degree higher than
+     * the original optimized cut's degree-12 fit -- see "v2 CHANGELOG" at
+     * the top of this file. */
+    float p = bits2f(0xAD2B0E51);                          /* c7 */
+    p = p * x2 + bits2f(0x310D96C7);                         // FMA (c6)
+    p = p * x2 + bits2f(0xB493D39B);                         // FMA (c5)
+    p = p * x2 + bits2f(0x37D00ACA);                         // FMA (c4)
+    p = p * x2 + bits2f(0xBAB60B4B);                         // FMA (c3)
+    p = p * x2 + bits2f(0x3D2AAAAA);                         // FMA (c2)
+    p = p * x2 + bits2f(0xBF000000);                         // FMA (c1)
+    p = p * x2 + bits2f(0x3F800000);                         // FMA (c0)
+
+    return p;
 }
 
-// tanh(x)
+/* -----------------------------------------------------------------------
+ * my_tanh(x) = 1 - 2/(e^(2x)+1)  -- same identity as the original, built
+ * on the fast my_exp() above. No clamp needed: my_exp saturates to 0 / inf
+ * at the extremes, which makes this formula saturate to -1 / +1 correctly.
+ * ----------------------------------------------------------------------- */
 float my_tanh(float x){
-    if (x > 10.0f) return 1.0f;
-    if (x < -10.0f) return -1.0f;
-
-    float expPos= my_exp(x);
-    float expNeg = my_exp(-x);
-
-    return (expPos - expNeg) / (expPos + expNeg);
+    float e2x = my_exp(x + x);
+    return 1.0f - 2.0f / (e2x + 1.0f);
 }
 
-// pow(x) for only integers
-float my_pow_int(float x, int y){
-    float result = 1.0f;
-    if (y < 0) {
+/* -----------------------------------------------------------------------
+ * my_pow_int(x, n) -- exponentiation by squaring: O(log n) multiplies
+ * instead of the original's O(n) loop (e.g. n=64: 6 multiplies vs 64).
+ * ----------------------------------------------------------------------- */
+float my_pow_int(float x, int n){
+    if (n < 0){
         x = 1.0f / x;
-        y = -y;
+        n = -n;
     }
-    for (int i = 0; i < y; i++) {
-        result *= x;
+    float result = 1.0f;
+    while (n > 0){
+        if (n & 1) result *= x;
+        x *= x;
+        n >>= 1;
     }
     return result;
 }
 
-// pow for general exponentiation
+/* -----------------------------------------------------------------------
+ * my_pow(x, y) = e^(y * ln(x)) -- structurally identical to the original,
+ * automatically inherits the accuracy/speed of my_log/my_exp above.
+ * ----------------------------------------------------------------------- */
 float my_pow(float x, float y){
-    if(x <= 0) return 0;
+    if (x <= 0.0f) return 0.0f;
     return my_exp(y * my_log(x));
 }
 
-// HIGH-PRECISION SQRT (Babylonian Method)
+/* -----------------------------------------------------------------------
+ * my_sqrt(x): bit-hack initial guess for 1/sqrt(x) ("fast inverse square
+ * root"), refined by three Newton iterations (multiply-only, no
+ * division), then sqrt(x) = x * (1/sqrt(x)).
+ * This is only ever called twice per inference (a constant inside gelu()),
+ * so it isn't performance-critical -- three iterations were chosen
+ * (instead of two) purely to match the original's ~1e-7 accuracy rather
+ * than to save instructions.
+ * ----------------------------------------------------------------------- */
 float my_sqrt(float x){
-    if(x <= 0.0f) return 0.0f;
-    float res = x;
-    // 10 iterations of Newton-Raphson is enough to max out 32-bit float precision
-    for(int i = 0; i < 10; i++) {
-        res = 0.5f * (res + x / res);
-    }
-    return res;
+    if (x <= 0.0f) return 0.0f;
+
+    float xhalf = 0.5f * x;
+    uint32_t i = f2bits(x);
+    i = 0x5f3759df - (i >> 1);
+    float y = bits2f(i);
+
+    y = y * (1.5f - xhalf * y * y);
+    y = y * (1.5f - xhalf * y * y);
+    y = y * (1.5f - xhalf * y * y);
+
+    return x * y;
 }

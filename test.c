@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
     static float py_ref[SEQ_LEN * D_MODEL]; 
 
     // Load Weights
-    FILE *f_w = fopen("../model_params/model_weights.bin", "rb");
+    FILE *f_w = fopen("model_params/model_weights.bin", "rb");
     if (!f_w) return 1;
     if (fread(raw_weights, sizeof(float), WEIGHTS_SIZE_FLOATS, f_w) != WEIGHTS_SIZE_FLOATS) {
         printf("Error reading weights file.\n");

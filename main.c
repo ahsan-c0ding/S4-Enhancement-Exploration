@@ -14,7 +14,7 @@ int main(int argc, char *argv[]) {
     static float input_image[IN_CHANNELS][IMG_SIZE][IMG_SIZE];
     static float output_probs[N_CLASSES];
 
-    FILE *f_weights = fopen("../model_params/model_weights.bin", "rb");
+    FILE *f_weights = fopen("model_params/model_weights.bin", "rb");
     if (!f_weights) {
         printf(" Error: Could not find model_weights.bin\n");
         return 1;
