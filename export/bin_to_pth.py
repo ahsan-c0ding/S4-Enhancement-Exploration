@@ -5,9 +5,8 @@ import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from model.gclassifier import GalaxyClassifierS4D
 
-SRC_BIN = "../model_params/model_weights.bin"
-OUT_PTH = "../model_params/galaxys4-30EPOCH-STANDARD.pth"
-
+SRC_BIN = r"C:\Users\abdul\Desktop\S4-Enhancement-Exploration\model_params\model_weights.bin"
+OUT_PTH = r"C:\Users\abdul\Desktop\S4-Enhancement-Exploration\model_params\galaxys4-30EPOCH-STANDARD.pth"
 # Exact key order + shapes generate_test_data.py wrote them in
 layout = [
     ('hilbert_scan.indices', (4096,), torch.int32),
