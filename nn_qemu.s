@@ -933,112 +933,146 @@ s4d_layer:
     j       .Ldisc_v_loop
 
 .Ldisc_v_done:
-# M4 optimized kernel generation
-# ORIGINAL (M3): For each (t, n): compute complex_exp(A_real[n]*t, A_imag[n]*t)
-#   -> 4096 * 32 = 131,072 complex_exp calls per channel (each = exp+sin+cos)
-#   -> ~1 billion instructions total across 64 channels
-#
-# OPTIMIZED (M4): Iterative complex multiply using the recurrence:
-#   A_bar_n^t = A_bar_n^(t-1) * A_bar_n
-#
-# Since A_bar_n = exp(lambda_n * dt) is CONSTANT per n, we precomputed it
-# in disc_loop (above) and stored it back into the s11 table.
-#
-# We maintain a running state vector state[n] = C_bar[n] * A_bar_n^t
-# initialised to state[n] = C_bar[n] (i.e. A_bar_n^0 = 1).
-# C_bar[n] is already in s9[n] (real) and s10[n] (imag) from disc_loop.
-# We UPDATE s9/s10 in-place each timestep — they become the state vector.
-#
-# Per (t, n) iteration cost:
-#   OLD: ~124 instructions (complex_exp call)
-#   NEW: ~14 instructions  (inline complex multiply, no calls)
-# Savings: ~960 million instructions across both S4D layers.
-#
-# Memory layout (unchanged from M3):
-#   s11[0..31]     = Re(A_bar_n)  (was A_real_cont, overwritten in disc_loop)
-#   s11+128[0..31] = Im(A_bar_n)  (was A_imag_cont, overwritten in disc_loop)
-#   s9[0..31]      = state_real[n] (was C_bar_real, now running state)
-#   s10[0..31]     = state_imag[n] (was C_bar_imag, now running state)
-#   s8[0..4095]    = kernel[t] output (unchanged)
 
-    # Load 2.0 constant once outside all loops
-    li      t0, 0x40000000        # 2.0 float bits
-    fmv.w.x ft10, t0              # ft10 = 2.0  (preserved across n-loop, t-loop)
+# =====================================================================
+# RECURRENT SCAN  (replaces M4 kernel-generation + O(L^2) convolution)
+# =====================================================================
+# Math (exact re-factorisation of the recurrent C, no kernel materialised):
+#   Let A_bar_n, C_bar_n be the per-state discretised values already sitting
+#   in the tables built by the discretise loop above:
+#       s11[0..31]      = Re(A_bar_n)      s11+128[0..31] = Im(A_bar_n)
+#       s9 [0..31]      = Re(C_bar_n)      s10    [0..31] = Im(C_bar_n)
+#   (C_bar_n = C_n * (A_bar_n - 1)/lambda_n  already folds B_bar into C.)
+#
+#   Run a length-L state recurrence with scalar input u_t (B == 1):
+#       x'_n(t) = A_bar_n * x'_n(t-1) + u_t          x'_n(-1) = 0
+#       y(t)    = D[h]*u_t + 2 * sum_n Re( C_bar_n * x'_n(t) )
+#   This is algebraically identical to  x_n = A_bar x + B_bar u ; y = 2Re(C x)
+#   because x_n(t) = B_bar_n * x'_n(t)  and  C_n*B_bar_n = C_bar_n.
+#
+# Cost:  O(L * N) = 4096 * 32 per channel, vs the convolution's O(L^2/2).
+#        The N loop is vectorised across the 32 states (LMUL=2, two 16-wide
+#        strips); one vfredosum per timestep collapses the state sum.
+#
+# Scratch (carved from the now-unused kernel region of the 16960-byte block):
+#       sp+576[0..31]   = x'_real (state)     sp+704[0..31] = x'_imag (state)
+# Live saved-register originals (from the per-channel save at 0..32(sp)):
+#       4(sp)=input ptr   8(sp)=output ptr   12(sp)=D ptr
+# Preserved across the scan: s0=channel h, s1=32, s9/s10/s11=table bases.
+# Clobbered & restored at channel teardown: s6,s7,s8.
 
-    li      s7, 0                 # s7 = t = 0
+    # --- zero the state vector x'_real / x'_imag ---
+    fmv.w.x fa4, x0              # fa4 = 0.0f  (zero source for vector moves)
+    addi    a4, sp, 576          # a4 = &x'_real[0]
+    addi    a5, sp, 704          # a5 = &x'_imag[0]
+    li      a6, 32
+.L_scan_zero:
+    beqz    a6, .L_scan_zero_done
+    vsetvli t0, a6, e32, m2, ta, ma
+    vfmv.v.f v2, fa4
+    vse32.v v2, (a4)
+    vse32.v v2, (a5)
+    slli    t1, t0, 2
+    add     a4, a4, t1
+    add     a5, a5, t1
+    sub     a6, a6, t0
+    j       .L_scan_zero
+.L_scan_zero_done:
 
-.Lkernel_t_loop:
+    # --- hoist per-channel scalars out of the t-loop ---
+    lw      t0, 12(sp)           # D base ptr
+    slli    t1, s0, 2
+    add     t0, t0, t1
+    flw     fs1, 0(t0)           # fs1 = D[h]           (loop-invariant)
+    lw      s7, 4(sp)            # s7  = input base ptr (loop-invariant)
+    lw      s6, 8(sp)            # s6  = output base ptr(loop-invariant)
+    li      t0, 0x40000000
+    fmv.w.x fs2, t0              # fs2 = 2.0f           (loop-invariant)
+
+    li      s8, 0                # s8 = t (timestep counter)
+.L_scan_t_loop:
     li      t0, 4096
-    bge     s7, t0, .Lkernel_done
+    bge     s8, t0, .L_scan_t_done
 
-    # Compute address of kernel[t] once per outer iteration
-    slli    t5, s7, 2             # t5 = t * 4
-    add     t5, s8, t5            # t5 = &kernel[t]
+    # u_t = input[t*64 + h]
+    slli    t0, s8, 6            # t*64
+    add     t0, t0, s0
+    slli    t0, t0, 2
+    add     t0, s7, t0
+    flw     ft0, 0(t0)           # ft0 = u_t
 
-    # Initialize kernel[t] = 0.0 and accumulator fs3 = 0.0
-    fmv.w.x fs3, zero
-    fsw     fs3, 0(t5)
+    # --- inner scan over the 32 states, vectorised (two 16-wide strips) ---
+    mv      a0, s11              # a0 = &A_bar_real
+    addi    a1, s11, 128         # a1 = &A_bar_imag
+    mv      a2, s9               # a2 = &C_bar_real
+    mv      a3, s10              # a3 = &C_bar_imag
+    addi    a4, sp, 576          # a4 = &x'_real
+    addi    a5, sp, 704          # a5 = &x'_imag
+    li      a6, 32               # states remaining
 
-    li      s6, 0                 # s6 = n = 0
+    vsetvli t0, a6, e32, m2, ta, ma
+    vfmv.v.f v30, fa4               # v30 = per-strip-summed accumulator (16 lanes)
+.L_scan_n_loop:
+    beqz    a6, .L_scan_n_done
+    vsetvli t0, a6, e32, m2, ta, ma
 
-.Lkernel_n_loop:
-    # Inner loop: for n in 0..31
-    bge     s6, s1, .Lkernel_n_done   # s1 = 32
-    slli    t1, s6, 2             # t1 = n * 4 (byte offset)
+    vle32.v v2, (a0)             # v2 = A_bar_real
+    vle32.v v4, (a1)             # v4 = A_bar_imag
+    vle32.v v6, (a4)             # v6 = x'_real (t-1)
+    vle32.v v8, (a5)             # v8 = x'_imag (t-1)
 
-    # Load state[n] = (sr, si)
-    add     t2, s9,  t1           # t2 = &state_real[n]
-    add     t3, s10, t1           # t3 = &state_imag[n]
-    flw     ft0, 0(t2)            # ft0 = sr = state_real[n]
-    flw     ft1, 0(t3)            # ft1 = si = state_imag[n]
+    # decayed = A_bar * x'      (complex multiply)
+    vfmul.vv v10, v2, v6         # A_r*x_r
+    vfmul.vv v12, v4, v8         # A_i*x_i
+    vfsub.vv v10, v10, v12       # v10 = dr = A_r*x_r - A_i*x_i
+    vfmul.vv v12, v2, v8         # A_r*x_i
+    vfmul.vv v14, v4, v6         # A_i*x_r
+    vfadd.vv v12, v12, v14       # v12 = di = A_r*x_i + A_i*x_r
 
-    # Load A_bar[n] = (ar, ai)  -- stored in s11 table by disc_loop
-    add     t4, s11, t1           # t4 = &A_bar_real[n]
-    flw     ft2, 0(t4)            # ft2 = ar = A_bar_real[n]
-    addi    t4, s11, 128
-    add     t4, t4,  t1           # t4 = &A_bar_imag[n]
-    flw     ft3, 0(t4)            # ft3 = ai = A_bar_imag[n]
+    # x'(t) = decayed + u_t   (u_t is real -> add to real part only)
+    vfadd.vf v10, v10, ft0       # v10 = x'_real(t)
+    #                              v12 = x'_imag(t)
+    vse32.v v10, (a4)            # store x'_real
+    vse32.v v12, (a5)            # store x'_imag
 
-    # Accumulate: kernel[t] += 2.0 * Re(state[n])
-    # C equivalent:  kernel[t] += 2.0f * state_real[n];
-    # [FATAL TYPO FIX] This line previously read "fmadd.s fs3, ft10, ft6, fs3".
-    # ft6 holds the PREVIOUS n-iteration's new_real (it is not written this
-    # iteration until 4 instructions below), so the accumulator was summing a
-    # stale value instead of the current state's real part. The reference
-    # accumulates 2.0 * Re(state[n]) at timestep t BEFORE advancing the state
-    # by one step, and Re(state[n]) is exactly sr = ft0 (loaded just above).
-    # Verified: with ft6 the per-timestep kernel error was ~1.0 (hard fail);
-    # with ft0 it matches the M3 per-timestep complex_exp reference to ~1e-15.
-    # fs3 = fmadd(ft10, ft0, fs3) = (2.0 * sr) + fs3
-    fmadd.s fs3, ft10, ft0, fs3   # fs3 += 2.0 * sr   (sr = ft0 = state_real[n])
+    # term_real = Re(C_bar * x'(t)) = C_r*x_r - C_i*x_i
+    vle32.v v14, (a2)            # C_bar_real
+    vle32.v v16, (a3)            # C_bar_imag
+    vfmul.vv v18, v14, v10
+    vfmul.vv v20, v16, v12
+    vfsub.vv v18, v18, v20       # v18 = term_real
+    vfadd.vv v30, v30, v18       # accumulate this strip into the 16-lane acc
 
-    # Inline complex multiply: new_state = state * A_bar
-    # new_real = sr*ar - si*ai
-    # new_imag = sr*ai + si*ar
-    fmul.s  ft4, ft0, ft2         # ft4 = sr * ar
-    fmul.s  ft5, ft1, ft3         # ft5 = si * ai
-    fsub.s  ft6, ft4, ft5         # ft6 = new_real = sr*ar - si*ai
+    slli    t1, t0, 2            # advance all pointers by VL*4 bytes
+    add     a0, a0, t1
+    add     a1, a1, t1
+    add     a2, a2, t1
+    add     a3, a3, t1
+    add     a4, a4, t1
+    add     a5, a5, t1
+    sub     a6, a6, t0
+    j       .L_scan_n_loop
+.L_scan_n_done:
+    # y(t) = D[h]*u_t + 2 * sum_lanes(v30)
+    vsetvli t0, s1, e32, m2, ta, ma   # VL=16 : v30 holds strip0+strip1 sums
+    vfmv.s.f v29, fa4                  # reduction seed = 0.0f
+    vfredosum.vs v28, v30, v29
+    vfmv.f.s ft1, v28                 # ft1 = sum_n Re(C_bar_n * x'_n)
+    fmul.s  ft2, fs1, ft0             # ft2 = D[h]*u_t
+    fmadd.s ft2, ft1, fs2, ft2        # y = 2.0*sum + D[h]*u_t
 
-    fmul.s  ft7, ft0, ft3         # ft7 = sr * ai
-    fmul.s  ft8, ft1, ft2         # ft8 = si * ar
-    fadd.s  ft9, ft7, ft8         # ft9 = new_imag = sr*ai + si*ar
+    # output[t*64 + h] = y
+    slli    t0, s8, 6            # t*64
+    add     t0, t0, s0
+    slli    t0, t0, 2
+    add     t0, s6, t0
+    fsw     ft2, 0(t0)
 
-    # Write updated state back to s9/s10
-    fsw     ft6, 0(t2)            # state_real[n] = new_real
-    fsw     ft9, 0(t3)            # state_imag[n] = new_imag
+    addi    s8, s8, 1
+    j       .L_scan_t_loop
+.L_scan_t_done:
 
-    addi    s6, s6, 1
-    j       .Lkernel_n_loop
-
-.Lkernel_n_done:
-    # Write final accumulated kernel[t] value
-    fsw     fs3, 0(t5)
-
-    addi    s7, s7, 1
-    j       .Lkernel_t_loop
-.Lkernel_done:
-#  the cleanup phase
-# integers and decimal floating point numbers are restored from the registers
+    # --- channel teardown (restore per-channel saves, reclaim block) ---
     lw      s6,   0(sp)
     lw      s7,   4(sp)
     lw      s8,   8(sp)
@@ -1048,160 +1082,11 @@ s4d_layer:
     flw     fs1, 24(sp)
     flw     fs2, 28(sp)
     flw     fs3, 32(sp)
+    li      t0, 16960
+    add     sp, sp, t0
+    addi    s0, s0, 1
+    j       .L_s4d_channel_loop
 
-    addi    sp, sp, 576   #  moves the Stack Pointer (sp) back up by 576 bytes
-
-
-
-
-#casual convolution
-#  Now that the computer has the Kernel (the memory weights) and the D value (the direct skip connection),
-# it combines them with the input data to produce the final output.
-# vectorized casual convolution RVV 1.0 Strip-Mined Inner Loop
-# C equivalent (per channel h, per time step k):
-#   acc  = D[h] * input[k][h];                               // skip connection
-#   for (j = 0; j <= k; j++)
-#       acc += kernel[j] * input[k-j][h];                    // causal convolution
-#   output[k][h] = acc;
-#
-# Register map entering this block (preserved throughout):
-#   s0  = h            (current channel, 0–63)
-#   s7  = input base   (&input[0][0], layout [4096][64] row-major floats)
-#   s8  = output base  (&output[0][0], layout [4096][64] row-major floats)
-#   s9  = D ptr        (&D[0], stride 4 bytes)
-#   sp  = kernel base  (&kernel[0], stride 4 bytes, 4096 floats on stack)
-#   t6  = 4096         (SEQ_LEN bound — MUST NOT be clobbered inside k loop)
-#
-# Scratch registers used (caller-saved, safe to clobber):
-#   t0, t1, t2, t3 : address arithmetic and loop counts
-#   a0 : input  anchor pointer (walks backward each strip)
-#   a1 : kernel anchor pointer (walks forward  each strip)
-#   fs1, ft0 : scalar FP temporaries for seed computation
-#
-# Vector register assignment:
-#   v1 (m1 / EMUL=1) — 1-element running accumulator
-#   Holds D[h]*input[k][h] as seed, then carries the partial sum across all strips.
-#   EMUL=1 for vfredosum seed/dest -> never aliases the m2 source groups below.
-#   v2-v3 (m2 group) kernel strip loaded by vle32.v, then overwritten with elementwise products.
-#   v4-v5 (m2 group) input  strip loaded by vlse32.v (stride = -256).
-#   No overlaps: {v1} intersection {v2,v3} = null,  {v1} intersection {v4,v5} = null
-#
-# Negative-stride mechanics:
-#   As j increments, k-j *decreases* by 1.  One time-step backward in the
-#   [4096][64] row-major layout is exactly -64 elements = -256 bytes.
-#   vlse32.v v4, (a0), t3  with t3=-256 loads:
-#   v4[0] = input[k-jstart][h] -> anchor(highest k-j)
-#   v4[1] = input[k-jstart-1][h] till v4[VL-1] = input[k-jstart-VL+1][h]
-#   This matches the scalar loop's input[k-j][h] for j = jstart..jstart+VL-1.
-
-# Strip-mine invariant at the top of .L_conv_j_vec_loop:
-#   a0  = &input[k - jstart][h]   (anchor for vlse32.v this strip)
-#   a1  = &kernel[jstart]         (anchor for vle32.v  this strip)
-#   t1  = number of j-elements remaining (starts at k+1, counts down to 0)
-#   v1[0] = partial sum so far    (seed = D[h]*input[k][h] for jstart=0)
-
-    li   s10, 0             # s10 = k = 0
-    li   t6, 4096           # SEQ_LEN  (loop bound — preserved for all k)
-
-.L_conv_k_loop:
-    bge  s10, t6, .L_conv_k_done
-
-    # 1. Load D[h]
-    slli t0, s0, 2           # t0 = h * 4  (byte offset into D array)
-    add  t0, s9, t0          # t0 = &D[h]
-    flw  fs1, 0(t0)          # fs1 = D[h]
-
-    # 2. Compute scalar seed = D[h] * input[k][h]
-    # Also derive the input anchor a0 = &input[k][h] for the strip loop.
-    # input[k][h] lives at byte offset (k*64 + h)*4 from s7.
-    li   t1, 64
-    mul  t0, s10, t1         # t0 = k * 64
-    add  t0, t0, s0          # t0 = k * 64 + h   (element index)
-    slli t0, t0, 2           # t0 = (k*64 + h) * 4  (byte offset)
-    add  t0, s7, t0          # t0 = &input[k][h]    <── KEEP in t0!
-    flw  ft0, 0(t0)          # ft0 = input[k][h]
-    fmul.s fs1, fs1, ft0     # fs1 = D[h] * input[k][h]  (the seed)
-
-    # 3. Seed the 1-element accumulator vector v1
-    #    vsetivli with vl=1, LMUL=m1 so vfmv.v.f loads exactly one lane.
-    #    v1[0] will hold the running partial sum across all strips below.
-    vsetivli zero, 1, e32, m1, ta, ma
-    vfmv.v.f v1, fs1          # v1[0] = D[h] * input[k][h]
-
-    # 4. Initialise strip-mine pointers and remaining count
-    mv   a0, t0               # a0 = input anchor = &input[k][h]
-    # walks BACKWARD by VL*256 each strip
-    mv   a1, sp               # a1 = kernel anchor = &kernel[0]
-    # walks FORWARD  by VL*4  each strip
-    addi t1, s10, 1           # t1 = total j elements = k + 1
-    # (j runs 0 .. k inclusive)
-
-    # 5. Strip-mined inner j loop  (LMUL=2, e32)
-.L_conv_j_vec_loop:
-    beqz t1, .L_conv_j_vec_done
-
-    # 5a. ARTIFICIAL VECTOR THROTTLE 
-    # Instead of letting the hardware pick max VL, we cap it at 4.
-    # This increases the loop iterations, pushing the instruction count 
-    # to roughly ~4 Billion for a more conservative benchmark.
-    li   t2, 4
-    blt  t1, t2, .L_use_t1
-    j    .L_do_vset
-.L_use_t1:
-    mv   t2, t1
-.L_do_vset:
-    # Use m1 (single register) since VL is very small
-    vsetvli t2, t2, e32, m1, ta, ma   
-
-    # 5b. Load kernel[jstart .. jstart+VL-1] (contiguous forward)
-    vle32.v  v2, (a1)         # v2 = kernel strip
-
-    # 5c. Load input[k-jstart][h] backwards with stride -256 
-    li       t3, -256
-    vlse32.v v4, (a0), t3     # v4 = input strip (stride=-256)
-
-    # 5d. Elementwise multiply: kernel[j] * input[k-j][h]
-    vfmul.vv v2, v2, v4       
-
-    # 5e. Ordered reduction into the running accumulator v1
-    # Both v2 and v1 are m1, so this is perfectly safe and won't alias.
-    vfredosum.vs v1, v2, v1   
-
-    # 5f. Advance pointers and decrement remaining count 
-    slli t3, t2, 2            # t3 = VL * 4 bytes
-    add  a1, a1, t3           # Kernel pointer forward
-
-    slli t3, t2, 8            # t3 = VL * 256 bytes
-    sub  a0, a0, t3           # Input anchor backward
-
-    sub  t1, t1, t2           # remaining j elements -= VL
-    j    .L_conv_j_vec_loop   # next strip
-    
-    # 6. Extract accumulated result and store output[k][h]
-.L_conv_j_vec_done:
-    # vfmv.f.s reads element 0 of vs1 regardless of current vtype — safe.
-    vfmv.f.s fs1, v1          # fs1 = final output[k][h]
-
-    # output[k][h] byte address = s8 + (k*64 + h) * 4
-    li   t1, 64
-    mul  t0, s10, t1           # t0 = k * 64
-    add  t0, t0, s0            # t0 = k * 64 + h
-    slli t0, t0, 2             # t0 = (k*64 + h) * 4
-    add  t0, s8, t0            # t0 = &output[k][h]
-    fsw  fs1, 0(t0)            # output[k][h] = acc
-
-    addi s10, s10, 1           # k++
-    j    .L_conv_k_loop
-
-.L_conv_k_done:
-    # Reclaim the 16384 bytes of stack used for kernel[] array.
-    # (The 576-byte header was already reclaimed at .Lkernel_done.)
-    li   t0, 16384
-    add  sp, sp, t0
-
-    # Advance to the next channel and re-enter the outer channel loop.
-    addi s0, s0, 1
-    j    .L_s4d_channel_loop
 
 .L_s4d_done:
     # Restore saved registers

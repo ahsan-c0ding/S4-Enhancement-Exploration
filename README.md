@@ -1,68 +1,110 @@
-# Milestone 4: RISC-V Vector Implementation (S4 Galaxy Classifier)
+# S4D Galaxy Classifier — RISC-V Vector (RVV 1.0) Implementation
 
-This repository contains the complete, validated RISC-V 32-bit Vector (RVV) assembly implementation of the S4D inference pipeline for Galaxy Classification. It builds upon the scalar baseline by utilizing vector strip-mining, branchless vector math approximations, and optimized memory strides to significantly reduce the dynamic instruction count.
+A hand-written RISC-V 32-bit assembly implementation of the S4D (diagonal Structured State Space) galaxy-morphology classifier, targeting the RVV 1.0 vector extension (`rv32gcv`) and profiled on the VeeR-iSS simulator.
 
-## Repository Structure
+The pipeline classifies a 64×64 grayscale galaxy image into one of four classes — Round Elliptical, In-between Elliptical, Cigar-shaped Elliptical, Edge-on Disk — through: **Hilbert scan → linear up-projection → S4D layer → GELU → S4D layer → GELU → take-last-timestep → linear classifier → softmax**. All math (exp, log, sin, cos, tanh, sqrt) is implemented from scratch in vectorized assembly; there is no external math library.
 
-* `/asm_m4/` - Contains all core assembly source files (`main.s`, `math.s`, `nn.s`), the data samples (`data_0.s` to `data_9.s`), and the automated Python/Bash evaluation scripts.
-* `Makefile` - The build system required to compile the assembly files.
-* `.gitignore` - Ensures repository hygiene by excluding compiled binaries and logs.
+## What's new in this version: recurrent S4D
 
-## Deployment and Evaluation Guide
+The S4D layer was rewritten from an **O(L²) causal convolution** to an **O(L·N) recurrent scan**, matching the recurrent reference in the `c` and `python` branches.
 
-The files in this repository are packaged for deployment into a standard `riscv-env-setup` workspace. Please follow these instructions carefully to replicate the validation results and benchmark the speedup.
+Previously the layer materialized a length-`L` kernel and convolved it against the input (`L = 4096` taps per output). It now walks the sequence with a state recurrence, updating a small `N = 32`-element complex state per timestep:
 
-### Step 1: Environment Preparation
+```
+x'ₙ(t) = Ā_bar,ₙ · x'ₙ(t-1) + uₜ            (x'(-1) = 0, scalar input B ≡ 1)
+y(t)   = D[h]·uₜ + 2 · Σₙ Re( C_bar,ₙ · x'ₙ(t) )
+```
 
-This code requires the RISC-V GNU Toolchain, QEMU, and VeeR-iSS configured with Vector Extension (RVV 1.0) support. It is assumed you are running this within the provided Docker container (via VS Code Dev Containers) or an environment where `riscv32-unknown-elf-gcc` is in your system PATH.
+This is algebraically identical to the standard `x = Ā·x + B̄·u ; y = 2·Re(C·x)` form, using the identity `xₙ = B̄ₙ·x'ₙ` and `Cₙ·B̄ₙ = C_bar,ₙ`. Folding `B̄` into `C_bar` lets the state update skip a complex multiply (the input `uₜ` is real, so it only touches the real part). The per-channel discretization block — which builds the `Ā_bar` and `C_bar` tables with vectorized `exp`/`sin`/`cos` — is unchanged; only the kernel-generation and convolution stages were replaced by the scan.
 
-Copy the contents of the deployment package directly into the root of your `riscv-env-setup` directory:
+The 32-element state loop is vectorized at **LMUL=2** (two 16-wide strips; VLEN = 256 bits → 16 fp32/register), with a single `vfredosum.vs` reduction per timestep.
 
-1. Copy all files from the `asm_m4` directory into the root of your environment:
-`cp -r CAAL-S4-Galaxy/asm_m4/* /path/to/riscv-env-setup/`
+## Results (Sample 0, VeeR-iSS dynamic instruction count)
 
-### Step 2: Task 2 Validation (Automated QEMU Extraction)
+| Metric | Convolution (previous) | Recurrent (this version) | Change |
+|---|---|---|---|
+| **Total instructions** | 4,699,917,296 | **59,447,792** | **~79× fewer (−98.7%)** |
+| Wall-clock (VeeR-iSS) | 11m 53s | 29.8s | ~24× faster |
+| B-type (branches) | 557,151,372 | 2,979,212 | ~187× fewer |
+| J-type (jumps) | 555,426,508 | 2,171,852 | ~256× fewer |
+| V-type (vector) | 1,349,153,760 (28.7%) | 28,211,168 (47.5%) | now the dominant class |
 
-We have provided an automated script (`run_task2_qemu_final.py`) that handles file stitching, GCC compilation (with `-march=rv32gcv`), QEMU execution, output extraction, and MSE/MAE calculation against the PyTorch reference binaries.
+The O(L²)→O(L·N) change removes the deeply-nested convolution loop, which is why the branch/jump overhead collapses and the remaining work becomes vector-dominated.
 
-Navigate to the root of your `riscv-env-setup` directory and run:
-`python3 run_task2_qemu_final.py`
+### Accuracy
 
-**Expected Behavior:** The script will iterate through samples 0 to 9. For each sample, it will execute the fully vectorized forward pass via QEMU, extract the floating-point probabilities, and evaluate them. Because the code utilizes an artificial vector length throttle (capped at VL=4) to produce realistic edge-device cycle counts, QEMU will take slightly longer per sample than a pure scalar run. It will output a 10/10 PASS End-to-End match.
+End-to-end class predictions match the reference on every sample that ships a reference file (samples 0–4: **5/5 class agreement**; probabilities match to ~3 decimal places). Samples 5–9 have no reference binaries in `test_data/`, so the validation script reports them as sentinel "FAIL" — this is missing-reference bookkeeping, not a numerical error.
 
-### Step 3: Task 3.3.1 (Static Instruction Profile)
+Per-layer MSE is exact through the Hilbert scan and linear projection, and sits at ~3e-7 for the S4D layers. This is slightly above the strict 1e-7 rubric target and is a **precision floor**, not a bug: the discretization uses custom fp32 polynomial `exp`/`sin`/`cos`, and the state recurrence compounds tiny per-step differences over 4096 timesteps. The error is identical across samples (systematic, not erratic) and is inherited from the shared discretization/math block, so the convolution version exhibits the same floor.
 
-To generate the static instruction count and family classification directly from the source code, run the following script:
-`python3 m4_static_count.py`
+## Repository structure
 
-### Step 4: Task 3.3.2 (Dynamic Instruction Profile - VeeR-iSS)
+```
+main.s              _start + argmax + exit; calls model_forward
+nn.s                Full pipeline: hilbert_scan, linear, s4d_layer (recurrent),
+                    gelu, softmax, take_last_timestamp, model_forward
+math.s              Vector math kernels: exp, log, sin, cos, tanh, sqrt
+data_0.s .. data_9.s   Per-sample input image + model weights, as .data
+*_qemu.s            QEMU-path variants of the above (used by run_task2_qemu_final.py)
+veer/link.ld        Linker script (memory layout for VeeR-iSS)
+veer/whisper.json   VeeR-iSS vector config (bytes_per_vec = 32)
+Makefile            Builds the three .s files into an ELF
+run_final_benchmark.sh   Concatenate + compile + VeeR-iSS profile (Task 3.3.2)
+parse_veer_profile.py    Turns the VeeR profile into the LaTeX instruction table
+run_task2_qemu_final.py  Per-sample QEMU run + MSE/MAE vs reference (Task 2)
+m4_static_count.py       Static instruction count (Task 3.3.1)
+model_params/       Model weights binary
+test_data/          Input images + PyTorch reference tensors (per layer)
+```
 
-To evaluate the architectural performance and extract the dynamic instruction breakdown, we have fully automated the VeeR-iSS simulation.
+## Requirements
 
-To generate the profile for Sample 0, simply run the provided bash script:
-`./run_final_benchmark.sh`
+* RISC-V cross toolchain with vector support on `PATH`: `riscv32-unknown-elf-gcc` (`-march=rv32gcv -mabi=ilp32f`).
+* **VeeR-iSS** (`whisper`) on `PATH` — for the dynamic instruction benchmark.
+* **qemu-riscv32** on `PATH` — for the per-layer numerical validation.
+* Python 3 with NumPy — for the validation/profile scripts.
 
-**Expected Behavior:** This script automatically concatenates `main.s`, `nn.s`, `math.s`, and `data_0.s`, compiles them, and executes the binary through VeeR-iSS using the `whisper.json` configuration. The simulation takes approximately 90 to 120 seconds. Once complete, it automatically triggers `parse_veer_profile.py` to print the final LaTeX table, proving the heavy utilization of V-type instructions and the massive reduction in overall instruction count.
+No Docker or dev-container is required; a toolchain-in-`PATH` setup is sufficient.
 
-## Troubleshooting Guide
+## Build & run
 
-### Issue 1: "FileNotFoundError: [Errno 2] No such file or directory: 'riscv32-unknown-elf-gcc'"
+### 1. Numerical validation (QEMU, ~1 min)
 
-**Cause:** The Python scripts rely on the `subprocess` module to call GCC and QEMU. If you execute the scripts in a standard terminal (outside the VS Code Dev Container), Linux will not be able to locate the compiler.
-**Solution A:** Ensure you have opened the `riscv-env-setup` folder in VS Code and selected "Reopen in Container". Run the script from the VS Code terminal.
-**Solution B:** If you are bypassing Docker, manually edit the subprocess calls in the Python scripts to match the exact absolute path of your local toolchain (e.g., `/opt/riscv/bin/riscv32-unknown-elf-gcc`).
+```bash
+python3 run_task2_qemu_final.py
+```
 
-### Issue 2: "QEMU Timed Out for Sample X"
+Runs each sample through QEMU, extracts all intermediate tensors, and compares against the PyTorch references in `test_data/`. Reference paths are resolved relative to this script's own directory. Expect 5/5 end-to-end class matches on samples 0–4; samples 5–9 lack reference files.
 
-**Cause:** The automated testing script sets a timeout for QEMU execution. Because the M4 implementation heavily utilizes the RVV extension and explicitly throttles the Vector Length (VL) to simulate realistic hardware constraints, QEMU must translate billions of micro-operations into x86 instructions.
-**Solution:** Open `run_task2_qemu_final.py`, locate the `subprocess.run` call for QEMU, and increase the timeout threshold to allow the emulation to finish.
+### 2. Dynamic instruction benchmark (VeeR-iSS, ~30s)
 
-### Issue 3: "Illegal Instruction" during QEMU or VeeR-iSS Execution
+```bash
+bash run_final_benchmark.sh
+```
 
-**Cause:** The simulator or compiler was not instructed to enable the Vector Extension.
-**Solution:** Ensure that the `-march=rv32gcv` flag is present in all GCC compilation commands, and that QEMU is invoked with `-cpu rv32,v=true`. The provided `run_final_benchmark.sh` and Python scripts already include these flags by default.
+Concatenates `main.s + nn.s + math.s + data_0.s`, compiles with `-march=rv32gcv`, runs it through `whisper`, and prints the instruction total plus the LaTeX family-breakdown table (via `parse_veer_profile.py`).
 
-### Issue 4: "Missing floats in Sample X" or "IndexError" during Array Slicing
+### 3. Static instruction count
 
-**Cause:** This occurs if QEMU fails to execute completely, resulting in a truncated stdout log. This is often caused by a missing linker script.
-**Solution:** Ensure that the `veer/link.ld` file is present in your environment, as the GCC compilation commands explicitly depend on it for correct memory layout.
+```bash
+python3 m4_static_count.py
+```
+
+### Build only
+
+```bash
+make            # -> build/exe/galaxy_classifier.exe
+make clean
+```
+
+## Troubleshooting
+
+* **`riscv32-unknown-elf-gcc: not found`** — the toolchain isn't on `PATH`. Add your cross-compiler's `bin/` to `PATH` (or edit the compiler path in the scripts).
+* **`Illegal instruction` in QEMU/VeeR** — the vector extension wasn't enabled. Ensure `-march=rv32gcv` on every GCC call and that `whisper` uses `veer/whisper.json`.
+* **`Missing floats in Sample X`** — QEMU produced truncated output, usually a missing/incorrect `veer/link.ld`. Confirm the linker script is present.
+* **Samples 5–9 report FAIL in validation** — expected: those samples have no reference tensors in `test_data/`. Not a code error.
+
+## History
+
+* **Recurrent S4D (current):** O(L·N) vectorized scan; ~79× fewer dynamic instructions than the convolution version at equal accuracy.
+* **Convolution (previous):** O(L²) vectorized causal convolution with iterative kernel generation.

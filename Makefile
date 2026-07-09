@@ -1,5 +1,5 @@
 # Makefile for Milestone 3 RISC-V Assembly (S4D Galaxy Classifier)
-# This Makefile is intended to be run from the root of the riscv-env-setup directory.
+# Run from the repository root (where main.s / nn.s / math.s live).
 
 CC = riscv32-unknown-elf-gcc
 CFLAGS = -march=rv32gcv -mabi=ilp32f -nostartfiles -lm

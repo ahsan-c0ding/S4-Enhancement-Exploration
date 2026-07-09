@@ -6,7 +6,7 @@ import time
 import numpy as np
 
 NUM_SAMPLES = 10
-WORKSPACE_DIR = os.path.expanduser("~/CAAL_M3_WORKSPACE/CAAL-S4-Galaxy")
+WORKSPACE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPECTED_FLOATS = 4096 + 262144 + 262144 + 262144 + 64 + 4
 
 # Rubric Tolerances
@@ -188,7 +188,7 @@ for res in master_results:
     sample_id = res['sample']
     for idx, (layer_name, metrics) in enumerate(res['layers'].items()):
         # Only print the Sample ID on the first row of its block
-        disp_sample = f"\multirow{{6}}{{*}}{{{sample_id}}}" if idx == 0 else ""
+        disp_sample = rf"\multirow{{6}}{{*}}{{{sample_id}}}" if idx == 0 else ""
         
         t_mae_str = f"$< 10^{{{int(np.log10(metrics['t_mae']))}}}$" if metrics['t_mae'] is not None else "N/A"
         t_mse_str = f"$< 10^{{{int(np.log10(metrics['t_mse']))}}}$"
