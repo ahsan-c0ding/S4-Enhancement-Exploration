@@ -1,5 +1,6 @@
 #include "math.h"
 #include <stdint.h>
+#include <string.h>
 
 static float bits2f(uint32_t b){ float f; memcpy(&f, &b, 4); return f; }
 static uint32_t f2bits(float f){ uint32_t b; memcpy(&b, &f, 4); return b; }
