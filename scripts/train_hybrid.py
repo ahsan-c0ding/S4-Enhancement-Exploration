@@ -62,7 +62,7 @@ train = _baseline_train_module.train
 RNG_SEED = 42
 BATCH_SIZE = 16
 LR = 0.0015
-EPOCHS = 10  # adjust as needed -- seq_len=256 trains much faster than the
+EPOCHS = 30  # adjust as needed -- seq_len=256 trains much faster than the
              # 4096-length baseline, so this is comfortably affordable
 COLORED = False
 CLASS_NAMES = ["Smooth Round", "Smooth Cigar", "Edge-on Disk", "Unbarred Spiral"]
