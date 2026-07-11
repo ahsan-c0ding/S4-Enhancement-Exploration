@@ -61,7 +61,7 @@ train = _baseline_train_module.train
 RNG_SEED = 42
 BATCH_SIZE = 16
 LR = 0.0015
-EPOCHS = 30  # see module docstring for why this isn't the notebook's 10
+EPOCHS = 10  # see module docstring for why this isn't the notebook's 10
 COLORED = False
 CLASS_NAMES = ["Smooth Round", "Smooth Cigar", "Edge-on Disk", "Unbarred Spiral"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -207,14 +207,16 @@ def print_results_table(results):
           "Train time (s) | Inference/sample (ms) |")
     print("|---|---|---|---|---|---|---|---|")
     for r in results:
+        train_time_str = f"{r['train_time_sec']:.1f}" if r['train_time_sec'] is not None else "n/a (loaded checkpoint)"
         print(f"| {r['name']} | {r['seq_len']} | {r['params']:,} | {r['test_acc']*100:.2f}% | "
-              f"{r['s4d_loop_ops']:,} | {r['total_est_ops']:,} | {r['train_time_sec']:.1f} | "
+              f"{r['s4d_loop_ops']:,} | {r['total_est_ops']:,} | {train_time_str} | "
               f"{r['inference_time_sec_per_sample']*1000:.3f} |")
-
 
 def plot_training_curves(results, out_path="training_curves_comparison.png"):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     for r in results:
+        if r["history"] is None:   # e.g. baseline loaded from checkpoint, not retrained
+            continue
         axes[0].plot(r["history"]["loss"], label=r["name"])
         axes[1].plot(r["history"]["val_accuracy"], label=r["name"])
     axes[0].set_title("Training loss")
@@ -267,12 +269,45 @@ def main():
 
     results = []
 
-    # --- Baseline: pure Hilbert-scan -> S4D x2 (unmodified) ---
+    # --- Baseline: load existing checkpoint instead of retraining ---
     baseline = GalaxyClassifierS4D(num_classes=NUM_CLASSES, colored=COLORED)
-    results.append(run_experiment(
-        baseline, "S4D baseline (seq_len=4096)",
-        train_loader, val_loader, test_loader, EPOCHS,
+    baseline.load_state_dict(torch.load(
+        os.path.join(_REPO_ROOT, "model_params", "galaxys4-30EPOCH-STANDARD.pth"),
+        map_location=DEVICE,
     ))
+    baseline = baseline.to(DEVICE)
+    baseline.eval()
+
+    # Evaluate on test set only (no training loop, no history)
+    correct, total = 0, 0
+    all_preds, all_targets = [], []
+    with torch.no_grad():
+        for imgs, labels in test_loader:
+            imgs, labels = imgs.to(DEVICE), labels.to(DEVICE)
+            logits = baseline(imgs, return_logits=True)
+            preds = torch.argmax(logits, dim=1)
+            target = torch.argmax(labels, dim=1)
+            correct += (preds == target).sum().item()
+            total += labels.size(0)
+            all_preds.extend(preds.cpu().numpy())
+            all_targets.extend(target.cpu().numpy())
+    baseline_test_acc = correct / total
+    baseline_cm = confusion_matrix(all_targets, all_preds)
+    seq_len = 4096
+    total_ops, s4d_ops = total_est_ops(baseline, seq_len)
+
+    results.append({
+        "name": "S4D baseline (seq_len=4096)",
+        "seq_len": seq_len,
+        "params": count_params(baseline),
+        "test_acc": baseline_test_acc,
+        "s4d_loop_ops": s4d_ops,
+        "total_est_ops": total_ops,
+        "train_time_sec": None,   # not retrained this run
+        "inference_time_sec_per_sample": measure_inference_time(baseline, colored=COLORED, n_samples=100),
+        "history": None,          # no training curve to plot for this row
+        "confusion_matrix": baseline_cm.tolist(),
+    })
 
     # --- Hybrid, primary: CNN stem (16x) + S4D ---
     hybrid16 = GalaxyClassifierCNNS4D(num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=16)
