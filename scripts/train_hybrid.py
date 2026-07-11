@@ -9,10 +9,17 @@ Run from the repo root:
 
 Config below is copied verbatim from scripts/train.py's baseline run (same
 RNG_SEED, BATCH_SIZE, optimizer/lr, loss, split, COLORED) so the comparison
-is apples-to-apples. EPOCHS is set to 30, not the notebook's placeholder of
-10 -- model_params/galaxys4-30EPOCH-STANDARD.pth (the checkpoint actually
-shipped in this repo) confirms 30 epochs is what the baseline was last
-trained with, and the task brief says to use that higher value if found.
+is apples-to-apples.
+
+EPOCHS was originally set to 30 to match model_params/galaxys4-30EPOCH-STANDARD.pth,
+but the baseline's recurrent S4D layer runs a plain Python for-loop over all
+4096 timesteps (see model/s4d_recurrent.py) -- on a Kaggle T4 this measured
+out to ~5s/it, i.e. ~34 min/epoch, ~17hrs for 30 epochs on the baseline alone.
+That blows past Kaggle's 12-hour session cap before even starting the hybrid
+runs, so EPOCHS is dropped to 10 here. If you have more session time
+available (e.g. running locally, or splitting across multiple Kaggle
+sessions), bump this back up -- just keep it identical across all models in
+a given comparison run, since that's what makes it apples-to-apples.
 
 This script does NOT duplicate the training loop: it imports train() from
 scripts/train.py directly (by file path, so it works regardless of how this
@@ -61,7 +68,8 @@ train = _baseline_train_module.train
 RNG_SEED = 42
 BATCH_SIZE = 16
 LR = 0.0015
-EPOCHS = 30  # see module docstring for why this isn't the notebook's 10
+EPOCHS = 10  # dropped from 30 -- 5+ s/it on the 4096-length baseline made
+             # 30 epochs blow past Kaggle's 12-hour session cap on its own
 COLORED = False
 CLASS_NAMES = ["Smooth Round", "Smooth Cigar", "Edge-on Disk", "Unbarred Spiral"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -282,11 +290,14 @@ def main():
     ))
 
     # --- Hybrid, fallback: CNN stem (4x) + S4D ---
-    hybrid4 = GalaxyClassifierCNNS4D(num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=4)
-    results.append(run_experiment(
-        hybrid4, "CNN stem (4x) + S4D (seq_len=1024)",
-        train_loader, val_loader, test_loader, EPOCHS,
-    ))
+    # Dropped for this run to fit the Kaggle session window; the
+    # stem_reduction=16 run above already answers the research question.
+    # Re-enable if you have session time to spare.
+    # hybrid4 = GalaxyClassifierCNNS4D(num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=4)
+    # results.append(run_experiment(
+    #     hybrid4, "CNN stem (4x) + S4D (seq_len=1024)",
+    #     train_loader, val_loader, test_loader, EPOCHS,
+    # ))
 
     print_results_table(results)
 
