@@ -16,7 +16,7 @@ class HilbertScan(nn.Module):
     Attributes
     ----------
     indices : torch.LongTensor
-        Precomputed Hilbert curve indices for a 64×64 grid, stored as a
+        Precomputed Hilbert curve indices for an n×n grid, stored as a
         non-trainable buffer.
     
     Input
@@ -24,20 +24,31 @@ class HilbertScan(nn.Module):
     x : torch.Tensor
         Input tensor of shape (B, C, H, W), where
         B : batch size
-        C : number of channels (1 for grayscale, 3 for RGB)
-        H : height (64)
-        W : width (64)
+        C : number of channels
+        H : height (n)
+        W : width (n)
     
     Returns
     -------
     out : torch.Tensor
-        Reordered tensor of shape (B, seq_len, C) where seq_len = H*W = 4096.
+        Reordered tensor of shape (B, seq_len, C) where seq_len = H*W = n*n.
         Pixels are arranged according to the Hilbert curve traversal order.
     """
-    def __init__(self):
-        """Initialize HilbertScan with precomputed indices for 64x64 images."""
+    def __init__(self, n=64):
+        """Initialize HilbertScan with precomputed indices for an n x n grid.
+
+        Parameters
+        ----------
+        n : int, optional
+            Grid size (must be a power of 2). Default 64, which keeps the
+            existing GalaxyClassifierS4D baseline (scanning the raw 64x64
+            image) unaffected. The hybrid CNN+S4D classifier passes a
+            smaller n (e.g. 16) since it scans the CNN stem's downsampled
+            feature map instead of the raw image.
+        """
         super().__init__()
-        indices = self.get_hilbert_indices(64)
+        self.n = n
+        indices = self.get_hilbert_indices(n)
         self.register_buffer('indices', indices)
 
     def _rot(self, s, x, y, rx, ry):
