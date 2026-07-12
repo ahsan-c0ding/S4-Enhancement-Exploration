@@ -337,53 +337,29 @@ def main():
 
     results = []
 
-    # --- Hybrid: CNN stem (4x, seq_len=1024) + S4D, COLOR ON ---
-    # Primary candidate: retains the most spatial resolution, and is the
-    # combo (color + full recipe + enough epochs) that was still untested
-    # as of the last analysis. Most likely to close the gap.
-    hybrid4 = GalaxyClassifierCNNS4D(
-        num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=4,
-        num_s4_layers=NUM_S4_LAYERS,
-    )
-    results.append(run_experiment(
-        hybrid4, "CNN stem (4x, color) + S4D (seq_len=1024)",
-        train_loader, val_loader, test_loader, EPOCHS,
-    ))
-
-    # --- Hybrid: CNN stem (16x, seq_len=256) + S4D, COLOR ON ---
-    # Kept for direct before/after comparison against the course-era
-    # grayscale 16x run (69.05%) -- isolates how much of the gain is
-    # "color" vs "more resolution".
+    # --- Hybrid: CNN stem (16x, color) + S4D (seq_len=256), 3 S4D layers ---
+    # 16x beat 4x decisively (86.80% vs 82.15%, ~4x faster to train/infer) --
+    # locking that in as the config going forward. This run bumps
+    # num_s4_layers 2->3 to test whether S4D depth is the next lever, since
+    # Smooth Cigar / Edge-on Disk confusion is still the dominant error
+    # even with color (85+84 of ~264 test errors in the 2-layer run).
     hybrid16 = GalaxyClassifierCNNS4D(
         num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=16,
         num_s4_layers=NUM_S4_LAYERS,
     )
     results.append(run_experiment(
-        hybrid16, "CNN stem (16x, color) + S4D (seq_len=256)",
+        hybrid16, f"CNN stem (16x, color) + S4D (seq_len=256, {NUM_S4_LAYERS} layers)",
         train_loader, val_loader, test_loader, EPOCHS,
     ))
 
-    # --- Add the baseline back in later for the full comparison ---
-    # from model import GalaxyClassifierS4D
-    # baseline = GalaxyClassifierS4D(num_classes=NUM_CLASSES, colored=COLORED)
-    # baseline.load_state_dict(torch.load(
-    #     os.path.join(_REPO_ROOT, "model_params", "galaxys4-30EPOCH-STANDARD.pth"),
-    #     map_location=DEVICE,
-    # ))
-    # ... (evaluate on test_loader, same pattern as run_experiment's eval block,
-    #      then results.insert(0, {...}) so it prints first in the table)
-    # NOTE: that checkpoint was trained on grayscale input (COLORED=False),
-    # so it is NOT a fair comparison against the color-enabled runs above
-    # without retraining it with COLORED=True too.
-
     print_results_table(results)
 
-    with open("results_table_research.json", "w") as f:
+    with open("results_table_16x_3layer.json", "w") as f:
         json.dump(results, f, indent=2)
-    print("\nSaved results_table_research.json")
+    print("\nSaved results_table_16x_3layer.json")
 
-    plot_training_curves(results, out_path="training_curves_research.png")
-    plot_confusion_matrices(results, out_path="confusion_matrices_research.png")
+    plot_training_curves(results, out_path="training_curves_16x_3layer.png")
+    plot_confusion_matrices(results, out_path="confusion_matrices_16x_3layer.png")
 
 
 if __name__ == "__main__":
