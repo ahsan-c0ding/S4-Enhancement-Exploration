@@ -85,7 +85,7 @@ from model.functions import export_model_parameters, load_data
 from utils import set_pbar_style
 
 
-def train(train_loader, val_loader, model, optimizer, loss_fn, epochs, device, verbose=True):
+def train(train_loader, val_loader, model, optimizer, loss_fn, epochs, device, verbose=True, scheduler=None):
     """Train the model and validate after each epoch.
 
     Parameters:
@@ -104,6 +104,12 @@ def train(train_loader, val_loader, model, optimizer, loss_fn, epochs, device, v
         Number of training epochs.
     device : torch.device
         Device to run the training on (CPU or GPU).
+    verbose : bool
+        Whether to print per-epoch progress.
+    scheduler : torch.optim.lr_scheduler._LRScheduler, optional
+        Learning rate scheduler, stepped once per epoch after validation.
+        If None (default), learning rate stays constant, matching the
+        original baseline training regime.
 
     Returns:
     --------
@@ -159,6 +165,9 @@ def train(train_loader, val_loader, model, optimizer, loss_fn, epochs, device, v
 
         val_accuracy = correct / total
         history["val_accuracy"].append(val_accuracy)
+
+        if scheduler is not None:
+            scheduler.step()
 
         if verbose:
             print(f"Epoch {epoch+1}/{epochs} - Loss: {epoch_loss:.4f} - Val Accuracy: {val_accuracy:.4f}")
