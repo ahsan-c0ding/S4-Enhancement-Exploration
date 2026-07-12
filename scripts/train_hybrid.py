@@ -62,10 +62,8 @@ train = _baseline_train_module.train
 # ---------------------------------------------------------------------
 RNG_SEED = 42
 BATCH_SIZE = 16
-LR = 0.0015  # NOTE: baseline used 0.0015 -- if you want a strictly
-             # apples-to-apples comparison against the baseline checkpoint,
-             # set this back to 0.0015.
-EPOCHS = 25
+LR = 0.0015  # matches original baseline training regime
+EPOCHS = 20
 COLORED = False
 CLASS_NAMES = ["Smooth Round", "Smooth Cigar", "Edge-on Disk", "Unbarred Spiral"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -271,10 +269,10 @@ def main():
 
     results = []
 
-    # --- Hybrid, primary: CNN stem (16x) + S4D -- the only model this run trains ---
-    hybrid16 = GalaxyClassifierCNNS4D(num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=16)
+    # --- Hybrid: CNN stem (4x) + S4D -- seq_len=1024, more spatial detail retained ---
+    hybrid4 = GalaxyClassifierCNNS4D(num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=4)
     results.append(run_experiment(
-        hybrid16, "CNN stem (16x) + S4D (seq_len=256)",
+        hybrid4, "CNN stem (4x) + S4D (seq_len=1024)",
         train_loader, val_loader, test_loader, EPOCHS,
     ))
 
@@ -290,12 +288,12 @@ def main():
 
     print_results_table(results)
 
-    with open("results_table.json", "w") as f:
+    with open("results_table_4x.json", "w") as f:
         json.dump(results, f, indent=2)
-    print("\nSaved results_table.json")
+    print("\nSaved results_table_4x.json")
 
-    plot_training_curves(results)
-    plot_confusion_matrices(results)
+    plot_training_curves(results, out_path="training_curves_4x.png")
+    plot_confusion_matrices(results, out_path="confusion_matrices_4x.png")
 
 
 if __name__ == "__main__":
