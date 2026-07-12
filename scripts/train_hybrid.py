@@ -58,19 +58,74 @@ _spec.loader.exec_module(_baseline_train_module)
 train = _baseline_train_module.train
 
 # ---------------------------------------------------------------------
-# Config
+# Config -- RESEARCH PHASE (post-course, optimizing purely for accuracy)
 # ---------------------------------------------------------------------
 RNG_SEED = 42
-BATCH_SIZE = 16
-LR = 0.0015  # matches original baseline training regime
-EPOCHS = 20
-COLORED = False
+# Bumped from 16: the CNN stem cuts seq_len 16x/4x, so S4D's O(L) memory
+# blowup that forced BATCH_SIZE=16 in the course baseline no longer
+# applies here. Larger batches stabilize gradients on a small (~8k image)
+# dataset.
+BATCH_SIZE = 64
+LR = 0.001            # slightly lower than the course's 0.0015; the model
+                       # has more capacity now (bigger stem, GroupNorm,
+                       # optional 3rd S4D layer) and a lower LR + weight
+                       # decay is a safer combination for that.
+WEIGHT_DECAY = 1e-4    # L2 regularization -- wasn't used at all in the
+                       # course version. Helps now that capacity is up.
+LABEL_SMOOTHING = 0.05 # softens targets slightly; tends to help most on
+                       # genuinely ambiguous adjacent classes (exactly
+                       # the Smooth Cigar / Edge-on Disk pair we're stuck on)
+EPOCHS = 40            # doubled: bigger model + regularization typically
+                       # needs a longer schedule to fully converge
+COLORED = True         # <<< THE key change. Grayscale (channel-averaged)
+                       # input throws away the color/reddening signal
+                       # (dust lanes) that's the main way to distinguish
+                       # edge-on ellipticals (Smooth Cigar) from edge-on
+                       # spirals (Edge-on Disk) -- exactly our dominant
+                       # confusion pair. See conversation notes.
 CLASS_NAMES = ["Smooth Round", "Smooth Cigar", "Edge-on Disk", "Unbarred Spiral"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 D_MODEL = 64
 D_STATE = 64
+NUM_S4_LAYERS = 2      # set to 3 to try the deeper-stack variant
 
+class AugmentedGalaxyDataset(torch.utils.data.Dataset):
+    """
+    Wraps a (X, y) tensor pair and applies random label-preserving
+    augmentation on each __getitem__ call: random 90/180/270 rotation and
+    random horizontal/vertical flip. Galaxies have no canonical orientation,
+    so these transforms don't change the true class -- they're close to
+    free additional training signal for a small (8k image) dataset.
+
+    Train-only: never wrap val/test sets with this, since evaluation needs
+    to reflect real, unaugmented performance.
+    """
+    def __init__(self, X, y_onehot):
+        self.X = X
+        self.y_onehot = y_onehot
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        img = self.X[idx]  # (C, H, W)
+        label = self.y_onehot[idx]
+
+        # Random rotation: 0, 90, 180, or 270 degrees
+        k = random.randint(0, 3)
+        if k > 0:
+            img = torch.rot90(img, k, dims=(1, 2))
+
+        # Random horizontal flip
+        if random.random() < 0.5:
+            img = torch.flip(img, dims=(2,))
+
+        # Random vertical flip
+        if random.random() < 0.5:
+            img = torch.flip(img, dims=(1,))
+
+        return img, label
 
 def set_seed(seed=RNG_SEED):
     random.seed(seed)
@@ -96,16 +151,25 @@ def s4d_loop_ops(seq_len, d_model=D_MODEL, d_state=D_STATE):
 
 
 def stem_conv_macs(model):
-    """Sum over the CNN stem's conv layers of out_H*out_W*out_C*in_C*k*k."""
+    """
+    Sum over the CNN stem's conv layers of out_H*out_W*out_C*in_C*k*k.
+    Updated for the research-version CNNStem, which has 4 possible conv
+    layers (stem_conv, res_conv -- both stride 1, full-res; down1, down2
+    -- stride 2, only down2 present when reduction==16).
+    """
     stem = getattr(model, "cnn_stem", None)
     if stem is None:
         return 0
     total = 0
     in_hw = 64
-    for conv in (stem.conv1, stem.conv2):
+    # stem_conv, res_conv: stride 1, resolution unchanged (64x64)
+    for conv in (stem.stem_conv, stem.res_conv):
+        k = conv.kernel_size[0]
+        total += in_hw * in_hw * conv.out_channels * conv.in_channels * k * k
+    # down1 (and down2 if present): stride 2, halves resolution each time
+    for conv in (stem.down1, stem.down2):
         if conv is None:
             continue
-        # stride=2, kernel=3, padding=1 -> exact halving for even in_hw
         out_hw = in_hw // 2
         k = conv.kernel_size[0]
         total += out_hw * out_hw * conv.out_channels * conv.in_channels * k * k
@@ -150,13 +214,17 @@ def measure_inference_time(model, colored, n_samples=100):
 def run_experiment(model, name, train_loader, val_loader, test_loader, epochs):
     set_seed(RNG_SEED)  # re-seed before each run so init/shuffling is reproducible
     model = model.to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    # AdamW (decoupled weight decay) instead of plain Adam -- with
+    # WEIGHT_DECAY=0 this is identical to Adam, but decoupled decay is the
+    # correct choice now that WEIGHT_DECAY > 0 (plain Adam's L2-via-grad
+    # interacts badly with its per-parameter adaptive LR).
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     # Cosine-anneal LR from LR down toward 0 over the run, so late-epoch
     # steps shrink instead of staying fixed-size -- fixes the oscillation
     # seen near convergence with a constant LR (see conversation notes).
     # T_max=epochs completes exactly one decay cycle over the full run.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    loss_fn = nn.CrossEntropyLoss()
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
 
     print(f"\n{'='*70}\nTraining: {name}\n{'='*70}")
     t0 = time.time()
@@ -258,8 +326,8 @@ def main():
     x_train, x_val, y_train_onehot, y_val_onehot = train_test_split(
         X, y_onehot, test_size=0.2, random_state=RNG_SEED, stratify=y
     )
-    train_ds = TensorDataset(x_train, y_train_onehot)
-    val_ds = TensorDataset(x_val, y_val_onehot)
+    train_ds = AugmentedGalaxyDataset(x_train, y_train_onehot)  # was: TensorDataset(x_train, y_train_onehot)
+    val_ds = TensorDataset(x_val, y_val_onehot)  # unchanged -- no augmentation at eval time
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
 
@@ -269,19 +337,31 @@ def main():
 
     results = []
 
-    # --- Hybrid: CNN stem (16x) + S4D -- seq_len=256 ---
-    hybrid16 = GalaxyClassifierCNNS4D(num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=16)
+    # --- Hybrid: CNN stem (4x, seq_len=1024) + S4D, COLOR ON ---
+    # Primary candidate: retains the most spatial resolution, and is the
+    # combo (color + full recipe + enough epochs) that was still untested
+    # as of the last analysis. Most likely to close the gap.
+    hybrid4 = GalaxyClassifierCNNS4D(
+        num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=4,
+        num_s4_layers=NUM_S4_LAYERS,
+    )
     results.append(run_experiment(
-        hybrid16, "CNN stem (16x) + S4D (seq_len=256)",
+        hybrid4, "CNN stem (4x, color) + S4D (seq_len=1024)",
         train_loader, val_loader, test_loader, EPOCHS,
     ))
-    
-    # --- Hybrid: CNN stem (4x) + S4D -- seq_len=1024, more spatial detail retained ---
-    #hybrid4 = GalaxyClassifierCNNS4D(num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=4)
-    #results.append(run_experiment(
-    #    hybrid4, "CNN stem (4x) + S4D (seq_len=1024)",
-    #    train_loader, val_loader, test_loader, EPOCHS,
-    #))
+
+    # --- Hybrid: CNN stem (16x, seq_len=256) + S4D, COLOR ON ---
+    # Kept for direct before/after comparison against the course-era
+    # grayscale 16x run (69.05%) -- isolates how much of the gain is
+    # "color" vs "more resolution".
+    hybrid16 = GalaxyClassifierCNNS4D(
+        num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=16,
+        num_s4_layers=NUM_S4_LAYERS,
+    )
+    results.append(run_experiment(
+        hybrid16, "CNN stem (16x, color) + S4D (seq_len=256)",
+        train_loader, val_loader, test_loader, EPOCHS,
+    ))
 
     # --- Add the baseline back in later for the full comparison ---
     # from model import GalaxyClassifierS4D
@@ -292,15 +372,18 @@ def main():
     # ))
     # ... (evaluate on test_loader, same pattern as run_experiment's eval block,
     #      then results.insert(0, {...}) so it prints first in the table)
+    # NOTE: that checkpoint was trained on grayscale input (COLORED=False),
+    # so it is NOT a fair comparison against the color-enabled runs above
+    # without retraining it with COLORED=True too.
 
     print_results_table(results)
 
-    with open("results_table_4x.json", "w") as f:
+    with open("results_table_research.json", "w") as f:
         json.dump(results, f, indent=2)
-    print("\nSaved results_table_4x.json")
+    print("\nSaved results_table_research.json")
 
-    plot_training_curves(results, out_path="training_curves_4x.png")
-    plot_confusion_matrices(results, out_path="confusion_matrices_4x.png")
+    plot_training_curves(results, out_path="training_curves_research.png")
+    plot_confusion_matrices(results, out_path="confusion_matrices_research.png")
 
 
 if __name__ == "__main__":

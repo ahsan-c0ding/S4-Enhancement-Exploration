@@ -40,9 +40,10 @@ class GalaxyClassifierCNNS4D(nn.Module):
     unlike GalaxyClassifierS4D -- there is no separate `uproject` Linear
     here; the stem's output channel dim *is* the projection.
 
-    S4D itself (model/s4d_recurrent.py) is reused unmodified: d_state stays
-    64 per the project's fixed constraints, only seq_len shrinks, and only
-    because of what happens upstream in the stem.
+    S4D itself (model/s4d_recurrent.py) is reused unmodified apart from an
+    optional 3rd stacked layer (num_s4_layers=3); d_state is still
+    configurable via s4_state, only seq_len shrinks because of what
+    happens upstream in the stem.
 
     Parameters
     ----------
@@ -54,21 +55,33 @@ class GalaxyClassifierCNNS4D(nn.Module):
         Number of output classes (default 4).
     colored : bool, optional
         If True, expects RGB input images (3 channels); if False, expects
-        grayscale images (1 channel) (default True, matching
-        GalaxyClassifierS4D's default so the two classes are drop-in
-        compatible).
+        grayscale images (1 channel). Default True -- color carries the
+        dust-lane/reddening signal needed to separate Smooth Cigar from
+        Edge-on Disk, the dominant error mode observed with grayscale-only
+        input.
     stem_reduction : int, optional
         Sequence-length reduction factor applied by the CNN stem before
         Hilbert-scanning, one of {4, 16}:
-          - 16 (default): primary variant, two stride-2 conv blocks,
+          - 16 (default): three-stage stem (stride1 -> stride2 -> stride2),
             64x64 -> 16x16, seq_len 4096 -> 256.
-          - 4: milder fallback, single stride-2 conv block,
-            64x64 -> 32x32, seq_len 4096 -> 1024. Kept as a fallback data
-            point in case the 16x cut degrades accuracy too much to be a
-            fair comparison against the baseline.
+          - 4: milder cut, two-stage stem (stride1 -> stride2),
+            64x64 -> 32x32, seq_len 4096 -> 1024. Retains more spatial
+            resolution; the recommended default for research runs where
+            accuracy matters more than compute savings.
     mid_channels : int, optional
-        Hidden channel width inside the stem (only used by the
-        stem_reduction=16 variant, which has two conv layers). Default 16.
+        Hidden channel width inside the stem's stride-1 detail-extraction
+        stage. Default 32 (raised from the course version's 16 for more
+        capacity).
+    stem_dropout : float, optional
+        Dropout2d applied inside the stem after the stride-1 block.
+        Default 0.1.
+    head_dropout : float, optional
+        Dropout applied to the pooled sequence representation right before
+        the classifier head. Default 0.2.
+    num_s4_layers : int, optional
+        Number of stacked S4D layers, one of {2, 3}. Default 2 (matches
+        the course architecture); set to 3 to test whether 2 layers is a
+        capacity bottleneck once the stem/data changes above are in place.
 
     Attributes
     ----------
@@ -94,14 +107,18 @@ class GalaxyClassifierCNNS4D(nn.Module):
     """
 
     def __init__(self, s4_state=64, d_model=64, num_classes=4, colored=True,
-                 stem_reduction=16, mid_channels=16):
+                 stem_reduction=16, mid_channels=32, stem_dropout=0.1,
+                 head_dropout=0.2, num_s4_layers=2):
         super().__init__()
         if stem_reduction not in (4, 16):
             raise ValueError(f"stem_reduction must be 4 or 16, got {stem_reduction}")
+        if num_s4_layers not in (2, 3):
+            raise ValueError(f"num_s4_layers must be 2 or 3, got {num_s4_layers}")
 
         self.hilbert_channels = 1 if not colored else 3
         self.d_model = d_model
         self.stem_reduction = stem_reduction
+        self.num_s4_layers = num_s4_layers
 
         # Spatial side of the feature grid after the stem: 64 -> 64/sqrt(reduction)
         # reduction=16 -> two stride-2 blocks -> /4 side reduction -> grid=16
@@ -111,27 +128,42 @@ class GalaxyClassifierCNNS4D(nn.Module):
 
         # CNN stem: local feature extraction + downsampling. Its last conv
         # projects channels to d_model, so no separate uproject Linear is
-        # needed (unlike the baseline).
+        # needed (unlike the baseline). Research-version stem (see
+        # cnn_stem.py) runs a full-resolution stride-1 pass before any
+        # downsampling, so thin structures (dust lanes etc.) survive.
         self.cnn_stem = CNNStem(
             in_channels=self.hilbert_channels,
             d_model=d_model,
             mid_channels=mid_channels,
             reduction=stem_reduction,
+            dropout=stem_dropout,
         )
 
         # Hilbert scan over the downsampled feature grid (not the raw image)
         self.hilbert_scan = HilbertScan(n=grid)
 
-        # S4D layers -- reused unmodified from the baseline; only seq_len
-        # shrinks, because of what happens upstream in the stem.
+        # S4D layers. Stack of 2 (course default) or 3 (research option --
+        # a bit more sequence-modeling capacity now that d_model/mid_channels
+        # are also bigger, in case 2 layers is now the bottleneck).
         self.s4_1 = S4D(d_model=d_model, d_state=s4_state, transposed=False)
         self.act1 = nn.GELU()
 
         self.s4_2 = S4D(d_model=d_model, d_state=s4_state, transposed=False)
         self.act2 = nn.GELU()
 
-        # Take last timestep
+        if num_s4_layers == 3:
+            self.s4_3 = S4D(d_model=d_model, d_state=s4_state, transposed=False)
+            self.act3 = nn.GELU()
+        else:
+            self.s4_3 = None
+            self.act3 = None
+
+        # Take last timestep (currently mean-pooling, see tlts.py)
         self.take_last = TakeLastTimestep()
+
+        # Light dropout before the classifier head -- regularization for
+        # the ~8k-image dataset now that capacity has gone up.
+        self.head_drop = nn.Dropout(head_dropout)
 
         # Classifier
         self.fc = nn.Linear(d_model, num_classes)
@@ -178,8 +210,14 @@ class GalaxyClassifierCNNS4D(nn.Module):
         s4_out2, _ = self.s4_2(a1)
         a2 = self.act2(s4_out2)  # (B, seq_len, d_model)
 
-        # 5. Take last timestep
+        # 4b. Optional S4D layer 3 + GELU (num_s4_layers=3)
+        if self.s4_3 is not None:
+            s4_out3, _ = self.s4_3(a2)
+            a2 = self.act3(s4_out3)  # (B, seq_len, d_model)
+
+        # 5. Take last timestep (mean-pool, see tlts.py)
         last = self.take_last(a2)  # (B, d_model)
+        last = self.head_drop(last)
 
         # 6. Classifier: d_model -> num_classes
         logits = self.fc(last)  # (B, num_classes)

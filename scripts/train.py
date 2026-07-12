@@ -194,7 +194,13 @@ if __name__ == "__main__":
     CLASS_NAMES =  ["Smooth Round", "Smooth Cigar", "Edge-on Disk", "Unbarred Spiral"] # Class names for GalaxyMNIST
 
     # Whether to use colored images
-    COLORED = False  # Start with grayscale
+    # RESEARCH PHASE: was False (grayscale-only) for the course. Switched
+    # to True here so the baseline stays a fair comparison point against
+    # the color-enabled hybrid runs in scripts/train_hybrid.py -- the
+    # dominant Smooth Cigar / Edge-on Disk confusion is plausibly a
+    # color/dust-lane signal that grayscale throws away for the baseline
+    # too, not just the hybrid.
+    COLORED = True
 
     # Set RNG seeds for reproducibility
     # Use your ERP id...
