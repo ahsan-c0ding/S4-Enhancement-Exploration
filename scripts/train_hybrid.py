@@ -88,7 +88,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 D_MODEL = 64
 D_STATE = 64
-NUM_S4_LAYERS = 2      # set to 3 to try the deeper-stack variant
+NUM_S4_LAYERS = 3      # set to 3 to try the deeper-stack variant
 
 class AugmentedGalaxyDataset(torch.utils.data.Dataset):
     """
