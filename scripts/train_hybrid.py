@@ -77,18 +77,26 @@ LABEL_SMOOTHING = 0.05 # softens targets slightly; tends to help most on
                        # the Smooth Cigar / Edge-on Disk pair we're stuck on)
 EPOCHS = 40            # doubled: bigger model + regularization typically
                        # needs a longer schedule to fully converge
-COLORED = True         # <<< THE key change. Grayscale (channel-averaged)
-                       # input throws away the color/reddening signal
-                       # (dust lanes) that's the main way to distinguish
-                       # edge-on ellipticals (Smooth Cigar) from edge-on
-                       # spirals (Edge-on Disk) -- exactly our dominant
-                       # confusion pair. See conversation notes.
+COLORED = False        # <<< TEMPORARILY back to grayscale, on purpose.
+                       # This isolates the color contribution: same
+                       # redesigned stem (stride-1 full-res extraction,
+                       # GroupNorm, more capacity) + same training recipe
+                       # (AdamW, weight decay, label smoothing, 40 epochs)
+                       # as the 86.80% color run -- only COLORED changes.
+                       # If this lands back near the old ~69% ceiling, it
+                       # confirms color (not the stem/training changes)
+                       # was doing essentially all the work. If it lands
+                       # meaningfully above 69% but below 86.80%, the stem
+                       # redesign was worth some of the gain on its own.
 CLASS_NAMES = ["Smooth Round", "Smooth Cigar", "Edge-on Disk", "Unbarred Spiral"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 D_MODEL = 64
 D_STATE = 64
-NUM_S4_LAYERS = 3      # set to 3 to try the deeper-stack variant
+NUM_S4_LAYERS = 2      # winning config from the color runs (86.80%
+                       # beat 86.65% at 3 layers) -- kept at 2 here so
+                       # this run isolates color, not depth. (see
+                       # STEM_CONFIGS below for where this is used)
 
 class AugmentedGalaxyDataset(torch.utils.data.Dataset):
     """
@@ -337,29 +345,45 @@ def main():
 
     results = []
 
-    # --- Hybrid: CNN stem (16x, color) + S4D (seq_len=256), 3 S4D layers ---
-    # 16x beat 4x decisively (86.80% vs 82.15%, ~4x faster to train/infer) --
-    # locking that in as the config going forward. This run bumps
-    # num_s4_layers 2->3 to test whether S4D depth is the next lever, since
-    # Smooth Cigar / Edge-on Disk confusion is still the dominant error
-    # even with color (85+84 of ~264 test errors in the 2-layer run).
-    hybrid16 = GalaxyClassifierCNNS4D(
+    # --- Ablation: CNN stem (16x) + S4D (seq_len=256), GRAYSCALE ---
+    # Same redesigned stem + same training recipe as the 86.80% color run
+    # -- only COLORED changed (True -> False here). Isolates how much of
+    # the gain came from color vs. the architecture/training changes.
+    hybrid16_gray = GalaxyClassifierCNNS4D(
         num_classes=NUM_CLASSES, colored=COLORED, stem_reduction=16,
         num_s4_layers=NUM_S4_LAYERS,
     )
     results.append(run_experiment(
-        hybrid16, f"CNN stem (16x, color) + S4D (seq_len=256, {NUM_S4_LAYERS} layers)",
+        hybrid16_gray, f"CNN stem (16x, grayscale) + S4D (seq_len=256, {NUM_S4_LAYERS} layers)",
         train_loader, val_loader, test_loader, EPOCHS,
     ))
 
+    # --- For reference (not re-run here) ---
+    # CNN stem 16x, grayscale, course-era stem/recipe:       69.05% / 69.10%
+    # CNN stem 16x, color,    redesigned stem/recipe, 2 layer: 86.80%
+    # CNN stem 16x, color,    redesigned stem/recipe, 3 layer: 86.65%
+    #
+    # --- Add the baseline back in later for the full comparison ---
+    # from model import GalaxyClassifierS4D
+    # baseline = GalaxyClassifierS4D(num_classes=NUM_CLASSES, colored=COLORED)
+    # baseline.load_state_dict(torch.load(
+    #     os.path.join(_REPO_ROOT, "model_params", "galaxys4-30EPOCH-STANDARD.pth"),
+    #     map_location=DEVICE,
+    # ))
+    # ... (evaluate on test_loader, same pattern as run_experiment's eval block,
+    #      then results.insert(0, {...}) so it prints first in the table)
+    # NOTE: that checkpoint was trained on grayscale input (COLORED=False),
+    # so it IS directly comparable to this run (both grayscale) if you want
+    # an apples-to-apples baseline-vs-hybrid comparison at this point.
+
     print_results_table(results)
 
-    with open("results_table_16x_3layer.json", "w") as f:
+    with open("results_table_16x_grayscale_ablation.json", "w") as f:
         json.dump(results, f, indent=2)
-    print("\nSaved results_table_16x_3layer.json")
+    print("\nSaved results_table_16x_grayscale_ablation.json")
 
-    plot_training_curves(results, out_path="training_curves_16x_3layer.png")
-    plot_confusion_matrices(results, out_path="confusion_matrices_16x_3layer.png")
+    plot_training_curves(results, out_path="training_curves_16x_grayscale_ablation.png")
+    plot_confusion_matrices(results, out_path="confusion_matrices_16x_grayscale_ablation.png")
 
 
 if __name__ == "__main__":
