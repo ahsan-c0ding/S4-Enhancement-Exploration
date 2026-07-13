@@ -1,12 +1,19 @@
+
+# Ignore Python cache
 # Ignore build artifacts and compiled binaries
-build/
-logs/
+# Ignore generated images if any
+* just old*
+*.elf
 *.exe
 *.o
 *.txt
-
-# Ignore generated images if any
-images/
-
-# Ignore Python cache
+*:Zone.Identifier
+*Zone.Identifier
+*_just old*
+/tmp/
 __pycache__/
+build/
+full_benchmark.s
+images/
+logs/
+qemu_compile.s

@@ -59,6 +59,7 @@ start_time = time.time()
 
 master_results = []
 e2e_agreements = 0
+labeled_samples = 0
 
 for i in range(NUM_SAMPLES):
     print("="*70)
@@ -80,13 +81,19 @@ for i in range(NUM_SAMPLES):
         "-T", "veer/link.ld", "-o", "build/exe/qemu_compile.exe", 
         "qemu_compile.s", "-nostartfiles", "-lm"
     ]
-    subprocess.run(compile_cmd, capture_output=True, text=True)
+    _cc = subprocess.run(compile_cmd, capture_output=True, text=True)
+    if _cc.returncode != 0:
+        print(f" FATAL: compile FAILED for sample {i} -- refusing to run a stale binary.\n{_cc.stderr}")
+        raise SystemExit(1)
+    # guarantee we never silently reuse a previous run's ELF
+    if not os.path.exists("build/exe/qemu_compile.exe"):
+        print(" FATAL: no ELF produced despite rc==0."); raise SystemExit(1)
 
     # 3. Run QEMU
     qemu_path = "./qemu/bin/qemu-riscv32" if os.path.exists("./qemu/bin/qemu-riscv32") else "qemu-riscv32"
     print(f"[*] Executing via QEMU (Extracting 790k+ floats)...", flush=True)
     try:
-        qemu_proc = subprocess.run([qemu_path, "-cpu", "rv32,v=true", "build/exe/qemu_compile.exe"], capture_output=True, text=True, timeout=180)
+        qemu_proc = subprocess.run([qemu_path, "-cpu", "rv32,v=true,vlen=256,elen=32", "build/exe/qemu_compile.exe"], capture_output=True, text=True, timeout=180)
         raw_output = qemu_proc.stdout + qemu_proc.stderr
     except subprocess.TimeoutExpired:
         print(f" QEMU Timed Out for Sample {i}.")
@@ -116,7 +123,8 @@ for i in range(NUM_SAMPLES):
     pt_pooled  = load_ref_bin(f"{test_dir}/sample_{i}_takelast.bin", 64)
     pt_softmax = load_ref_bin(f"{test_dir}/sample_{i}_softmax.bin", 4)
     
-    pt_class = int(np.argmax(pt_softmax)) if pt_softmax is not None else -1
+    has_ref = pt_softmax is not None
+    pt_class = int(np.argmax(pt_softmax)) if has_ref else -1
 
     # 6. Evaluate all layers
     layers = {
@@ -128,9 +136,13 @@ for i in range(NUM_SAMPLES):
         "Softmax Logits":     evaluate_layer("Softmax Logits",     calc_mse(rv_softmax, pt_softmax), calc_mae(rv_softmax, pt_softmax))
     }
 
-    e2e_match = "PASS" if rv_class == pt_class else "FAIL"
-    if e2e_match == "PASS": e2e_agreements += 1
+    if not has_ref:
+        e2e_match = "NO REF"          # sample produced a prediction but has no ground truth
+    else:
+        e2e_match = "PASS" if rv_class == pt_class else "FAIL"
+        if e2e_match == "PASS": e2e_agreements += 1
 
+    if has_ref: labeled_samples += 1
     master_results.append({
         "sample": i,
         "rv_probs": rv_softmax.tolist(),
@@ -144,7 +156,10 @@ for i in range(NUM_SAMPLES):
 
 print("\n" + "="*70)
 print(f" ALL SIMULATIONS COMPLETED IN {(time.time()-start_time)/60:.1f} MINS.")
-print(f" End-to-End Agreement: {e2e_agreements}/{NUM_SAMPLES} ({(e2e_agreements/NUM_SAMPLES)*100}%)")
+_unlabeled = NUM_SAMPLES - labeled_samples
+_pct = (e2e_agreements/labeled_samples*100) if labeled_samples else 0.0
+print(f" End-to-End Agreement (labeled only): {e2e_agreements}/{labeled_samples} ({_pct:.1f}%)")
+print(f" Note: {_unlabeled} sample(s) have NO reference in test_data/ -> reported as 'NO REF', excluded from the rate (a prediction was still produced).")
 print("="*70 + "\n")
 
 # =========================================================================
@@ -193,7 +208,11 @@ for res in master_results:
         t_mae_str = f"$< 10^{{{int(np.log10(metrics['t_mae']))}}}$" if metrics['t_mae'] is not None else "N/A"
         t_mse_str = f"$< 10^{{{int(np.log10(metrics['t_mse']))}}}$"
         
-        latex_table_2 += f"{disp_sample} & {layer_name} & {metrics['mse']:.2e} & {t_mse_str} & {metrics['mae']:.2e} & {t_mae_str} & {metrics['status']} \\\\\n"
+        if res['pt_class'] == -1:
+            mse_str, mae_str, stat = "NO REF", "NO REF", "NO REF"
+        else:
+            mse_str, mae_str, stat = f"{metrics['mse']:.2e}", f"{metrics['mae']:.2e}", metrics['status']
+        latex_table_2 += f"{disp_sample} & {layer_name} & {mse_str} & {t_mse_str} & {mae_str} & {t_mae_str} & {stat} \\\\\n"
     latex_table_2 += "\\hline\n"
 
 latex_table_2 += r"""\end{tabular}

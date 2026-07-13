@@ -49,29 +49,42 @@ my_exp:
     fcvt.w.s a0, ft1, rne        # Integer n
     fcvt.s.w ft2, a0             # Float n
 
-    # r = x - n * ln2
-    li      t0, 0x3F317218       # 0.693147 (ln2)
+    # r = x - n*ln2_hi - n*ln2_lo   (Cody-Waite split for accuracy)
+    li t0, 0x3F317200            # ln2_hi
     fmv.w.x ft3, t0
-    fmul.s  ft3, ft2, ft3        # n * ln2
-    fsub.s  ft4, fa0, ft3        # r
+    fmul.s ft3, ft2, ft3
+    fsub.s ft4, fa0, ft3
+    li t0, 0x35BFBE8E            # ln2_lo
+    fmv.w.x ft7, t0
+    fmul.s ft7, ft2, ft7
+    fsub.s ft4, ft4, ft7
 
-    # P(r) = 1 + r(1 + r(0.5 + r(0.166667 + r*0.0416667)))
-    li      t0, 0x3D2AAAAB       # 0.0416667
+    # P(r) = Horner(c6..c0), 6th-order Remez minimax
+    li t0, 0x3AB6ECC1            # c6
     fmv.w.x ft5, t0
-    fmul.s  ft5, ft5, ft4        # r * 0.0416667
-    li      t0, 0x3E2AAAAB       # 0.166667
+    li t0, 0x3C0937D6            # c5
     fmv.w.x ft6, t0
-    fadd.s  ft5, ft5, ft6        # 0.166667 + r*0.0416667
-    fmul.s  ft5, ft5, ft4        # r * (...)
-    li      t0, 0x3F000000       # 0.5
+    fmul.s ft5, ft5, ft4
+    fadd.s ft5, ft5, ft6
+    li t0, 0x3D2AAA0E            # c4
     fmv.w.x ft6, t0
-    fadd.s  ft5, ft5, ft6        # 0.5 + ...
-    fmul.s  ft5, ft5, ft4        # r * (...)
-    li      t0, 0x3F800000       # 1.0
+    fmul.s ft5, ft5, ft4
+    fadd.s ft5, ft5, ft6
+    li t0, 0x3E2AAA02            # c3
     fmv.w.x ft6, t0
-    fadd.s  ft5, ft5, ft6        # 1.0 + ...
-    fmul.s  ft5, ft5, ft4        # r * (...)
-    fadd.s  ft5, ft5, ft6        # P(r) = 1.0 + ...
+    fmul.s ft5, ft5, ft4
+    fadd.s ft5, ft5, ft6
+    li t0, 0x3F000000            # c2
+    fmv.w.x ft6, t0
+    fmul.s ft5, ft5, ft4
+    fadd.s ft5, ft5, ft6
+    li t0, 0x3F800000            # c1 (=c0=1.0)
+    fmv.w.x ft6, t0
+    fmul.s ft5, ft5, ft4
+    fadd.s ft5, ft5, ft6
+    fmul.s ft5, ft5, ft4
+    fadd.s ft5, ft5, ft6         # + c0 (1.0, reuse ft6)
+
 
     # 2^n using exponent injection
     addi    a0, a0, 127          # bias exponent

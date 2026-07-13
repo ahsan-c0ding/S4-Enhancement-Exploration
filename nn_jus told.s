@@ -961,69 +961,108 @@ s4d_layer:
 # Preserved across the scan: s0=channel h, s1=32, s9/s10/s11=table bases.
 # Clobbered & restored at channel teardown: s6,s7,s8.
 
-    # --- opt8-style recurrent scan --------------------------------------
-    # LMUL=4: the whole 32-element state is ONE vector group. The 4 per-channel
-    # constant tables AND the 2 state vectors stay RESIDENT in vector registers
-    # across all 4096 timesteps (no per-timestep reload/store), one vfredosum
-    # per timestep. Reg map (all m4, VL=32):
-    #   v4=A_r  v8=A_i  v12=C_r  v16=C_i  v20=x'_r  v24=x'_i   v0,v28=temps
-    fmv.w.x fa4, x0              # fa4 = 0.0f
+    # --- zero the state vector x'_real / x'_imag ---
+    fmv.w.x fa4, x0              # fa4 = 0.0f  (zero source for vector moves)
+    addi    a4, sp, 576          # a4 = &x'_real[0]
+    addi    a5, sp, 704          # a5 = &x'_imag[0]
+    li      a6, 32
+.L_scan_zero:
+    beqz    a6, .L_scan_zero_done
+    vsetvli t0, a6, e32, m2, ta, ma
+    vfmv.v.f v2, fa4
+    vse32.v v2, (a4)
+    vse32.v v2, (a5)
+    slli    t1, t0, 2
+    add     a4, a4, t1
+    add     a5, a5, t1
+    sub     a6, a6, t0
+    j       .L_scan_zero
+.L_scan_zero_done:
 
-    # hoist per-channel scalars (loop-invariant)
+    # --- hoist per-channel scalars out of the t-loop ---
     lw      t0, 12(sp)           # D base ptr
     slli    t1, s0, 2
     add     t0, t0, t1
-    flw     fs1, 0(t0)           # fs1 = D[h]
-    lw      s7, 4(sp)            # s7 = input base ptr
-    lw      s6, 8(sp)            # s6 = output base ptr
+    flw     fs1, 0(t0)           # fs1 = D[h]           (loop-invariant)
+    lw      s7, 4(sp)            # s7  = input base ptr (loop-invariant)
+    lw      s6, 8(sp)            # s6  = output base ptr(loop-invariant)
     li      t0, 0x40000000
-    fmv.w.x fs2, t0              # fs2 = 2.0f
+    fmv.w.x fs2, t0              # fs2 = 2.0f           (loop-invariant)
 
-    # set vtype ONCE (e32, m4 -> VL=32); persists across the whole t-loop
-    vsetvli t0, s1, e32, m4, ta, ma
-    vle32.v v4,  (s11)           # A_bar_real  (resident)
-    addi    t1, s11, 128
-    vle32.v v8,  (t1)            # A_bar_imag  (resident)
-    vle32.v v12, (s9)            # C_bar_real  (resident)
-    vle32.v v16, (s10)           # C_bar_imag  (resident)
-    vfmv.v.f v20, fa4            # x'_real = 0 (resident state)
-    vfmv.v.f v24, fa4            # x'_imag = 0 (resident state)
-
-    li      t3, 4096             # loop bound (t3 preserved across loop)
-    li      s8, 0                # s8 = t
+    li      s8, 0                # s8 = t (timestep counter)
 .L_scan_t_loop:
-    bge     s8, t3, .L_scan_t_done
+    li      t0, 4096
+    bge     s8, t0, .L_scan_t_done
 
     # u_t = input[t*64 + h]
-    slli    t0, s8, 6
+    slli    t0, s8, 6            # t*64
     add     t0, t0, s0
     slli    t0, t0, 2
     add     t0, s7, t0
     flw     ft0, 0(t0)           # ft0 = u_t
 
-    # decayed = A_bar * x'(t-1)   (complex); vtype still e32,m4,VL=32
-    vfmul.vv v0,  v4, v20        # A_r*x_r
-    vfmul.vv v28, v8, v24        # A_i*x_i
-    vfsub.vv v0,  v0, v28        # v0 = dr = A_r*x_r - A_i*x_i
-    vfmul.vv v28, v4, v24        # A_r*x_i
-    vfmul.vv v20, v8, v20        # A_i*x_r   (old x'_real consumed)
-    vfadd.vv v24, v28, v20       # v24 = di = x'_imag(t)  (old x'_imag consumed)
-    vfadd.vf v20, v0, ft0        # v20 = dr + u_t = x'_real(t)
+    # --- inner scan over the 32 states, vectorised (two 16-wide strips) ---
+    mv      a0, s11              # a0 = &A_bar_real
+    addi    a1, s11, 128         # a1 = &A_bar_imag
+    mv      a2, s9               # a2 = &C_bar_real
+    mv      a3, s10              # a3 = &C_bar_imag
+    addi    a4, sp, 576          # a4 = &x'_real
+    addi    a5, sp, 704          # a5 = &x'_imag
+    li      a6, 32               # states remaining
 
-    # term = Re(C_bar * x'(t)) = C_r*x_r - C_i*x_i
-    vfmul.vv v0,  v12, v20       # C_r*x_r
-    vfmul.vv v28, v16, v24       # C_i*x_i
-    vfsub.vv v0,  v0, v28        # v0 = term (32 lanes)
+    vsetvli t0, a6, e32, m2, ta, ma
+    vfmv.v.f v30, fa4               # v30 = per-strip-summed accumulator (16 lanes)
+.L_scan_n_loop:
+    beqz    a6, .L_scan_n_done
+    vsetvli t0, a6, e32, m2, ta, ma
 
-    # y(t) = D[h]*u_t + 2 * sum_n(term)
-    vfmv.s.f v28, fa4            # reduction seed = 0.0
-    vfredosum.vs v29, v0, v28    # v29[0] = sum_n term
-    vfmv.f.s ft1, v29
-    fmul.s  ft2, fs1, ft0        # D[h]*u_t
-    fmadd.s ft2, ft1, fs2, ft2   # y = 2.0*sum + D[h]*u_t
+    vle32.v v2, (a0)             # v2 = A_bar_real
+    vle32.v v4, (a1)             # v4 = A_bar_imag
+    vle32.v v6, (a4)             # v6 = x'_real (t-1)
+    vle32.v v8, (a5)             # v8 = x'_imag (t-1)
+
+    # decayed = A_bar * x'      (complex multiply)
+    vfmul.vv v10, v2, v6         # A_r*x_r
+    vfmul.vv v12, v4, v8         # A_i*x_i
+    vfsub.vv v10, v10, v12       # v10 = dr = A_r*x_r - A_i*x_i
+    vfmul.vv v12, v2, v8         # A_r*x_i
+    vfmul.vv v14, v4, v6         # A_i*x_r
+    vfadd.vv v12, v12, v14       # v12 = di = A_r*x_i + A_i*x_r
+
+    # x'(t) = decayed + u_t   (u_t is real -> add to real part only)
+    vfadd.vf v10, v10, ft0       # v10 = x'_real(t)
+    #                              v12 = x'_imag(t)
+    vse32.v v10, (a4)            # store x'_real
+    vse32.v v12, (a5)            # store x'_imag
+
+    # term_real = Re(C_bar * x'(t)) = C_r*x_r - C_i*x_i
+    vle32.v v14, (a2)            # C_bar_real
+    vle32.v v16, (a3)            # C_bar_imag
+    vfmul.vv v18, v14, v10
+    vfmul.vv v20, v16, v12
+    vfsub.vv v18, v18, v20       # v18 = term_real
+    vfadd.vv v30, v30, v18       # accumulate this strip into the 16-lane acc
+
+    slli    t1, t0, 2            # advance all pointers by VL*4 bytes
+    add     a0, a0, t1
+    add     a1, a1, t1
+    add     a2, a2, t1
+    add     a3, a3, t1
+    add     a4, a4, t1
+    add     a5, a5, t1
+    sub     a6, a6, t0
+    j       .L_scan_n_loop
+.L_scan_n_done:
+    # y(t) = D[h]*u_t + 2 * sum_lanes(v30)
+    vsetvli t0, s1, e32, m2, ta, ma   # VL=16 : v30 holds strip0+strip1 sums
+    vfmv.s.f v29, fa4                  # reduction seed = 0.0f
+    vfredosum.vs v28, v30, v29
+    vfmv.f.s ft1, v28                 # ft1 = sum_n Re(C_bar_n * x'_n)
+    fmul.s  ft2, fs1, ft0             # ft2 = D[h]*u_t
+    fmadd.s ft2, ft1, fs2, ft2        # y = 2.0*sum + D[h]*u_t
 
     # output[t*64 + h] = y
-    slli    t0, s8, 6
+    slli    t0, s8, 6            # t*64
     add     t0, t0, s0
     slli    t0, t0, 2
     add     t0, s6, t0
