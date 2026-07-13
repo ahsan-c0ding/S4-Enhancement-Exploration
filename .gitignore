@@ -1,89 +1,72 @@
-# ==========================================
-# Python
-# ==========================================
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-ENV/
-build/
-dist/
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ipynb_checkpoints/
 
-
+# *.ld (Optional: keep if you wrote them manually)
 # ==========================================
+# Build directories
 # C / C++
-# ==========================================
-# Prerequisites
-*.d
-
 # Compiled Object files
+# Executables
+# IDEs and Editors
+# Linker scripts (if they are generated)
+# Logs and Databases
+# Miscellaneous
+# Models and Checkpoints
+# Prerequisites
+# Python
+# RISC-V / Assembly / Embedded
+# Toolchain generated files
+* just old*
+*$py.class
+*.a
+*.app
+*.bin
+*.ckpt
+*.csv
+*.d
+*.dump
+*.egg-info/
+*.elf
+*.exe
+*.hex
+*.ko
+*.lib
+*.log
+*.lst
+*.map
 *.o
 *.obj
-*.ko
-*.so
-*.so.*
-*.a
-*.lib
-
-# Executables
-*.exe
 *.out
-*.app
-*.elf
-
-# Build directories
-[Bb]uild/
-[Bb]in/
-
-# ==========================================
-# RISC-V / Assembly / Embedded
-# ==========================================
-# Toolchain generated files
-*.map
-*.lst
-*.hex
-*.bin
-*.srec
-*.dump
-
-# Linker scripts (if they are generated)
-# *.ld (Optional: keep if you wrote them manually)
-
-# ==========================================
-# IDEs and Editors
-# ==========================================
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# ==========================================
-# Logs and Databases
-# ==========================================
-*.log
-*.csv
-*.sqlite3
-data/
-
-# ==========================================
-# Models and Checkpoints
-# ==========================================
 *.pt
 *.pth
-*.ckpt
-model_params/
-
-# ==========================================
-# Miscellaneous
-# ==========================================
-docs/
+*.py[cod]
+*.so
+*.so.*
+*.sqlite3
+*.srec
+*.swo
+*.swp
+*:Zone.Identifier
+*_just old*
+*~
+.DS_Store
+.idea/
+.ipynb_checkpoints/
+.mypy_cache/
+.pytest_cache/
 .temp/
+.venv/
+.vscode/
+/tmp/
+ENV/
+[Bb]in/
+[Bb]uild/
+__pycache__/
+build/
+data/
+dist/
+docs/
+full_benchmark.s
+images/*Zone.Identifier
+model_params/
+qemu_compile.s
 solution/
-images/
+venv/
