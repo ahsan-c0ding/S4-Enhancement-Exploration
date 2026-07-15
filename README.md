@@ -239,10 +239,8 @@ The project includes a lightweight math implementation to avoid external depende
 Implemented functions include:
 
 * `my_exp` – exponential function using Taylor series
-* `my_log` – logarithm via Newton's method
 * `my_sin` / `my_cos` – trigonometric functions via Taylor expansion
 * `my_tanh` – hyperbolic tangent
-* `my_pow` – general exponentiation
 * `my_sqrt` – square root via Babylonian method
 
 

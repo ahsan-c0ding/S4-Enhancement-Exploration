@@ -40,42 +40,6 @@ float my_exp(float x){
 }
 
 /* -----------------------------------------------------------------------
- * my_log(x) = ln(x).  x = m*2^e, ln(x) = e*ln2 + ln(m).
- * ln(m) via atanh double-angle identity: u = f/(f+2), f = m-1,
- *   ln(1+f) = 2*atanh(u) = 2u*(1 + u^2/3 + u^4/5 + u^6/7 + u^8/9 + u^10/11)
- * m in [1,2) => f in [0,1), but u is only in [0, 1/3) -- converges far
- * faster than a direct series in f, with no iteration/convergence risk.
- * ----------------------------------------------------------------------- */
-float my_log(float x){
-    if (x <= 0.0f) return -1e10f;  /* matches the original's sentinel */
-
-    uint32_t bits = f2bits(x);
-    int32_t e = (int32_t)((bits >> 23) & 0xFF) - 127;
-    uint32_t mbits = (bits & 0x007FFFFF) | 0x3F800000;
-    float m = bits2f(mbits);
-    float f = m - 1.0f;
-
-    float u  = f / (f + 2.0f);
-    float u2 = u * u;
-
-    float p = bits2f(0x3DA2E8BB);                  /* 1/11 */
-    p = p * u2 + bits2f(0x3DE38E39);                 // FMA (1/9)
-    p = p * u2 + bits2f(0x3E124925);                 // FMA (1/7)
-    p = p * u2 + bits2f(0x3E4CCCCD);                 // FMA (1/5)
-    p = p * u2 + bits2f(0x3EAAAAAB);                 // FMA (1/3)
-    p = p * u2 + 1.0f;                                // FMA (1)
-
-    float lnm = (2.0f * u) * p;
-
-    const float ln2_hi = bits2f(0x3F317200);
-    const float ln2_lo = bits2f(0x35BFBE8E);
-    float ef = (float)e;
-    float r = ef * ln2_hi + lnm;                       // FMA
-    r = ef * ln2_lo + r;                                 // FMA
-    return r;
-}
-
-/* -----------------------------------------------------------------------
  * my_sin(x), my_cos(x)
  * Reduce to r in [-pi,pi] via n = round(x/2pi), r = x - n*2pi, using a
  * Cody-Waite hi/lo split of 2pi. Rounding to nearest lands r in [-pi,pi]
@@ -144,33 +108,6 @@ float my_cos(float x){
 float my_tanh(float x){
     float e2x = my_exp(x + x);
     return 1.0f - 2.0f / (e2x + 1.0f);
-}
-
-/* -----------------------------------------------------------------------
- * my_pow_int(x, n) -- exponentiation by squaring: O(log n) multiplies
- * instead of the original's O(n) loop (e.g. n=64: 6 multiplies vs 64).
- * ----------------------------------------------------------------------- */
-float my_pow_int(float x, int n){
-    if (n < 0){
-        x = 1.0f / x;
-        n = -n;
-    }
-    float result = 1.0f;
-    while (n > 0){
-        if (n & 1) result *= x;
-        x *= x;
-        n >>= 1;
-    }
-    return result;
-}
-
-/* -----------------------------------------------------------------------
- * my_pow(x, y) = e^(y * ln(x)) -- structurally identical to the original,
- * automatically inherits the accuracy/speed of my_log/my_exp above.
- * ----------------------------------------------------------------------- */
-float my_pow(float x, float y){
-    if (x <= 0.0f) return 0.0f;
-    return my_exp(y * my_log(x));
 }
 
 /* -----------------------------------------------------------------------
