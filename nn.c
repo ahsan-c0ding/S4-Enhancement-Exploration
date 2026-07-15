@@ -44,12 +44,19 @@ void linear(
     int out_features
 ) {
     for (int i = 0; i < batch_size; i++) {
+        // i*in_features / i*out_features don't depend on j or k -- hoist them
+        // out of the loops below instead of re-multiplying on every (j,k).
+        const int in_row  = i * in_features;
+        const int out_row = i * out_features;
+
         for (int j = 0; j < out_features; j++) {
+            // j*in_features doesn't depend on k -- same deal, hoist per-j.
+            const int w_row = j * in_features;
             float acc = bias[j];
             for (int k = 0; k < in_features; k++) {
-                acc += input[i * in_features + k] * weight[j * in_features + k];
+                acc += input[in_row + k] * weight[w_row + k];
             }
-            output[i * out_features + j] = acc;
+            output[out_row + j] = acc;
         }
     }
 }
@@ -80,8 +87,13 @@ void s4d_layer(
 
         float A_bar_real_arr[32], A_bar_imag_arr[32];
         float B_bar_real_arr[32], B_bar_imag_arr[32];
+        float C_real_arr[32], C_imag_arr[32];
 
         // Discretize once per channel, these stay constant for all 4096 timesteps.
+        // C doesn't need discretizing, but it was being re-read from C_real/C_imag
+        // by index on every single timestep below even though it only depends on
+        // (h, n) -- pull it into the same per-channel arrays as A_bar/B_bar so the
+        // hot t-loop never recomputes anything that isn't x or u.
         for (int n = 0; n < half_state; n++) {
             float lambda_real = -my_exp(log_A_real[h * half_state + n]);
             float lambda_imag = A_imag[h * half_state + n];
@@ -97,7 +109,14 @@ void s4d_layer(
 
             B_bar_real_arr[n] = (N_real * lambda_real + N_imag * lambda_imag) / denom;
             B_bar_imag_arr[n] = (N_imag * lambda_real - N_real * lambda_imag) / denom;
+
+            C_real_arr[n] = C_real[(h * half_state + n) * 2];
+            C_imag_arr[n] = C_imag[(h * half_state + n) * 2];
         }
+
+        // D[h] is a per-channel scalar too -- same story, read it once instead
+        // of re-indexing D on every one of the 4096 timesteps below.
+        float D_h = D[h];
 
         // State vector for this channel, zeroed at t=0.
         float x_real[32] = {0};
@@ -105,7 +124,7 @@ void s4d_layer(
 
         for (int t = 0; t < SEQ_LEN; t++) {
             float u_t = input[t][h];
-            float y = D[h] * u_t;  // feedthrough term, same as before
+            float y = D_h * u_t;  // feedthrough term, same as before
 
             for (int n = 0; n < half_state; n++) {
                 // x_t = A_bar * x_{t-1} + B_bar * u_t
@@ -118,9 +137,7 @@ void s4d_layer(
                 // y_t += 2*Re(C * x_t). The factor of 2 accounts for the conjugate
                 // pair we never explicitly store, we only keep n//2 modes.
                 float term_real, term_imag;
-                float C_real_val = C_real[(h * half_state + n) * 2];
-                float C_imag_val = C_imag[(h * half_state + n) * 2];
-                complex_mul(C_real_val, C_imag_val, x_real[n], x_imag[n], &term_real, &term_imag);
+                complex_mul(C_real_arr[n], C_imag_arr[n], x_real[n], x_imag[n], &term_real, &term_imag);
                 y += 2.0f * term_real;
             }
 

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nn.h"
+#include "profile.h"
 
 #define WEIGHTS_SIZE_FLOATS 21124
 
@@ -105,65 +106,96 @@ int main(int argc, char *argv[]) {
     const float* fc_w    = w; w += 4 * 64;
     const float* fc_b    = w; w += 4;
 
+    // Sets up the perf-based counter on non-RISC-V hosts; no-op on a real
+    // RISC-V build. Must happen once, before the first get_inst_count().
+    init_inst_counter();
+
     printf("===================================================================================\n");
     int passed_all = 1;
 
     // 1. Hilbert
+    uint64_t start_inst0 = get_inst_count();
     hilbert_scan(input_image, hilbert_out, hilbert_indices);
+    uint64_t end_inst0 = get_inst_count();
     sprintf(filepath, "%s_hilbert.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4096 * 1)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Hilbert Scan", (float*)hilbert_out, py_ref, 4096 * 1, 1e-12, 1e-12); 
+    printf("\n[PROFILE] Dynamic Instructions for Hilbert Scan Layer: %lu\n", end_inst0 - start_inst0);
 
     // 2. UProject
+    uint64_t start_inst1 = get_inst_count();
     linear((float*)hilbert_out, (float*)proj_out, uproj_w, uproj_b, SEQ_LEN, IN_CHANNELS, D_MODEL);
+    uint64_t end_inst1 = get_inst_count();
     sprintf(filepath, "%s_uproject.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Linear (UProject)", (float*)proj_out, py_ref, 4096 * 64, 1e-8, 1e-6); 
+    printf("\n[PROFILE] Dynamic Instructions for UProject Layer: %lu\n", end_inst1 - start_inst1);
 
     // 3. S4D 1
+    uint64_t start_inst2 = get_inst_count();
     s4d_layer(proj_out, s4d1_out, s4_1_dt, s4_1_Ar, s4_1_Ai, s4_1_Cr, s4_1_Ci, s4_1_D);
+    uint64_t end_inst2 = get_inst_count();
     printf("\r"); // Clear the printing carriage return from s4d
     sprintf(filepath, "%s_s4_1.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("S4D Layer 1", (float*)s4d1_out, py_ref, 4096 * 64, 1e-7, 5e-4); 
+    printf("\n[PROFILE] Dynamic Instructions for S4D1 Layer: %lu\n", end_inst2 - start_inst2);
 
     // 4. GELU 1
+    uint64_t start_inst3 = get_inst_count();
     gelu((float*)s4d1_out, 4096 * 64);
+    uint64_t end_inst3 = get_inst_count();
     sprintf(filepath, "%s_gelu_1.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("GELU 1", (float*)s4d1_out, py_ref, 4096 * 64, 1e-7, 5e-4); 
+    printf("\n[PROFILE] Dynamic Instructions for GELU1 Layer: %lu\n", end_inst3 - start_inst3);
 
     // 5. S4D 2 (Accumulated error increases thresholds slightly)
+    uint64_t start_inst4 = get_inst_count();
     s4d_layer(s4d1_out, s4d2_out, s4_2_dt, s4_2_Ar, s4_2_Ai, s4_2_Cr, s4_2_Ci, s4_2_D);
+    uint64_t end_inst4 = get_inst_count();
     printf("\r");
     sprintf(filepath, "%s_s4_2.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("S4D Layer 2", (float*)s4d2_out, py_ref, 4096 * 64, 5e-7, 1e-3); 
+    printf("\n[PROFILE] Dynamic Instructions for S4D2 Layer: %lu\n", end_inst4 - start_inst4);
 
     // 6. GELU 2
+    uint64_t start_inst5 = get_inst_count();
     gelu((float*)s4d2_out, 4096 * 64);
+    uint64_t end_inst5 = get_inst_count();
     sprintf(filepath, "%s_gelu_2.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4096 * 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("GELU 2", (float*)s4d2_out, py_ref, 4096 * 64, 5e-7, 1e-3); 
+    printf("\n[PROFILE] Dynamic Instructions for GELU2 Layer: %lu\n", end_inst5 - start_inst5);
 
     // 7. Take Last (Inherits GELU 2 error)
+    uint64_t start_inst6 = get_inst_count();
     take_last_timestamp(s4d2_out, pooled);
+    uint64_t end_inst6 = get_inst_count();
     sprintf(filepath, "%s_takelast.bin", prefix); 
     if (!load_bin(filepath, py_ref, 64)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Take Last", pooled, py_ref, 64, 5e-7, 1e-3); 
+    printf("\n[PROFILE] Dynamic Instructions for TLS Layer: %lu\n", end_inst6 - start_inst6);
 
     // 8. FC (Logits)
+    uint64_t start_inst7 = get_inst_count();
     linear(pooled, logits, fc_w, fc_b, 1, D_MODEL, N_CLASSES);
+    uint64_t end_inst7 = get_inst_count();
     for(int i=0; i<4; i++) probs[i] = logits[i]; // copy for softmax
     sprintf(filepath, "%s_fc.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("FC (Logits)", logits, py_ref, 4, 1e-6, 1e-3); 
+    printf("\n[PROFILE] Dynamic Instructions for FC Layer: %lu\n", end_inst7 - start_inst7);
 
     // 9. Softmax (Normalizes everything back down to strict rubric limits!)
+    uint64_t start_inst8 = get_inst_count();
     softmax(probs, 4);
+    uint64_t end_inst8 = get_inst_count();
     sprintf(filepath, "%s_softmax.bin", prefix); 
     if (!load_bin(filepath, py_ref, 4)) { printf("CRITICAL ERROR: Missing reference file %s\n", filepath); return 1; }
     passed_all &= validate_layer("Softmax", probs, py_ref, 4, 1e-8, 1e-4); 
+    printf("\n[PROFILE] Dynamic Instructions for Softmax Layer: %lu\n", end_inst8 - start_inst8);
 
     printf("===================================================================================\n");
     if (passed_all) {
